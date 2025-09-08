@@ -205,3 +205,28 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 닥터빌 프로그램 관련 제외 파일들
+# 개인 계정 정보가 포함된 배치 파일들
+*계정*.bat
+*account*.bat
+
+# Chrome 드라이버 (용량이 크고 버전에 따라 다름)
+chromedriver.exe
+chromedriver
+*.exe
+
+# 개인 설정 파일들
+config.ini
+settings.json
+*.log
+
+# 백업 파일들
+backup/
+*.bak
+*.backup
+
+# 임시 파일들
+temp/
+tmp/
+*.tmp
