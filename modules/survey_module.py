@@ -101,32 +101,44 @@ class SurveyModule(BaseModule):
             if self.gui_logger:
                 self.log_info("재입장하기 버튼 검색 중...")
             
-            # 페이지 로딩 대기 (재입장하기 버튼이 나타날 때까지)
-            self.web_automation.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, REENTER_BUTTON_SELECTOR))
-            )
-            
-            # 재입장하기 버튼 찾기
-            reenter_button = self.web_automation.driver.find_element(
-                By.CSS_SELECTOR, 
-                REENTER_BUTTON_SELECTOR
-            )
-            
-            if self.gui_logger:
-                self.log_info("재입장하기 버튼 발견")
-            
-            # 버튼 클릭
-            reenter_button.click()
-            
-            if self.gui_logger:
-                self.log_info("✅ 재입장하기 버튼 자동 클릭 완료")
-                self.log_info("새로운 팝업 창에서 설문참여 버튼을 찾는 중...")
-            
-            # 🔥 새로운 팝업 창에서 설문참여 버튼 자동 클릭
-            self.auto_click_survey_in_popup()
-            
-            return True
-            
+            # 재입장하기 버튼이 있는지 먼저 확인 (타임아웃 2초로 단축)
+            try:
+                # 페이지 로딩 대기 (재입장하기 버튼이 나타날 때까지)
+                WebDriverWait(self.web_automation.driver, 2).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, REENTER_BUTTON_SELECTOR))
+                )
+                
+                # 재입장하기 버튼 찾기
+                reenter_button = self.web_automation.driver.find_element(
+                    By.CSS_SELECTOR, 
+                    REENTER_BUTTON_SELECTOR
+                )
+                
+                if self.gui_logger:
+                    self.log_info("재입장하기 버튼 발견")
+                
+                # 버튼 클릭
+                reenter_button.click()
+                
+                if self.gui_logger:
+                    self.log_info("✅ 재입장하기 버튼 자동 클릭 완료")
+                    self.log_info("새로운 팝업 창에서 설문참여 버튼을 찾는 중...")
+                
+                # 🔥 새로운 팝업 창에서 설문참여 버튼 자동 클릭
+                self.auto_click_survey_in_popup()
+                
+                return True
+                
+            except TimeoutException:
+                # 재입장하기 버튼이 없는 경우 (이미 설문 완료)
+                if self.gui_logger:
+                    self.log_info("⚠ 재입장하기 버튼이 없습니다. 이미 설문이 완료되었거나 참여할 설문이 없습니다.")
+                    self.log_info("포인트 확인을 진행합니다...")
+                
+                # 포인트 확인 모듈 실행
+                self._run_points_check_module()
+                return False
+                
         except Exception as e:
             if self.gui_logger:
                 self.gui_logger(f"❌ {ERROR_REENTER_BUTTON_CLICK}: {str(e)}")
@@ -334,6 +346,12 @@ class SurveyModule(BaseModule):
                 
                 # 현재 페이지에서 모든 질문의 첫 번째 보기 자동 선택
                 self.auto_select_first_options()
+                
+                # 🔥 모든 필수 항목이 제대로 채워졌는지 확인
+                if not self.validate_required_fields():
+                    if self.gui_logger:
+                        self.gui_logger("❌ 필수 항목이 모두 채워지지 않았습니다. 설문 제출을 중단합니다.")
+                    return False
                 
                 if self.gui_logger:
                     self.log_info(f"{page_count}페이지 답변 완료")
@@ -543,6 +561,61 @@ class SurveyModule(BaseModule):
         """설문 완료 후 포인트 확인 모듈을 실행합니다 - BaseModule의 공통 메서드 사용"""
         self.check_points_after_activity()
     
+    def validate_required_fields(self):
+        """모든 필수 항목이 제대로 채워졌는지 확인합니다."""
+        try:
+            # 1. 라디오 버튼 그룹별로 하나씩 선택되었는지 확인
+            radio_groups = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]')
+            processed_groups = set()
+            
+            for radio in radio_groups:
+                name = radio.get_attribute('name')
+                if name and name not in processed_groups:
+                    # 해당 그룹에서 선택된 라디오 버튼이 있는지 확인
+                    selected_radio = self.web_automation.driver.find_element(
+                        By.CSS_SELECTOR, f'input[type="radio"][name="{name}"]:checked'
+                    )
+                    if not selected_radio:
+                        if self.gui_logger:
+                            self.gui_logger(f"❌ 라디오 버튼 그룹 '{name}'이 선택되지 않았습니다")
+                        return False
+                    processed_groups.add(name)
+            
+            # 2. 텍스트 입력 필드가 비어있지 않은지 확인
+            text_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="text"]')
+            for i, text_input in enumerate(text_inputs):
+                if not text_input.get_attribute('value').strip():
+                    if self.gui_logger:
+                        self.gui_logger(f"❌ 텍스트 입력 필드 {i+1}번이 비어있습니다")
+                    return False
+            
+            # 3. 이메일 필드가 유효한 이메일 형식인지 확인
+            email_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="email"]')
+            for i, email_input in enumerate(email_inputs):
+                email_value = email_input.get_attribute('value').strip()
+                if not email_value or '@' not in email_value:
+                    if self.gui_logger:
+                        self.gui_logger(f"❌ 이메일 필드 {i+1}번이 유효하지 않습니다: {email_value}")
+                    return False
+            
+            # 4. textarea 필드가 비어있지 않은지 확인
+            textarea_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'textarea')
+            for i, textarea in enumerate(textarea_inputs):
+                if not textarea.get_attribute('value').strip():
+                    if self.gui_logger:
+                        self.gui_logger(f"❌ textarea 필드 {i+1}번이 비어있습니다")
+                    return False
+            
+            if self.gui_logger:
+                self.gui_logger("✅ 모든 필수 항목이 올바르게 채워졌습니다")
+            
+            return True
+            
+        except Exception as e:
+            if self.gui_logger:
+                self.gui_logger(f"❌ 필수 항목 검증 중 오류: {str(e)}")
+            return False
+    
     def auto_select_first_options(self):
         """모든 질문의 첫 번째 보기를 자동으로 선택하고 텍스트 필드에 점을 입력합니다."""
         try:
@@ -594,8 +667,23 @@ class SurveyModule(BaseModule):
                 except:
                     continue
             
+            # 4. textarea 필드 - "." 입력
+            textarea_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'textarea')
+            textarea_count = 0
+            
+            for textarea in textarea_inputs:
+                try:
+                    textarea.clear()
+                    textarea.send_keys(".")
+                    textarea_count += 1
+                    if self.gui_logger:
+                        self.gui_logger(f"textarea {textarea_count}번 답변 입력 완료")
+                    time.sleep(0.02)  # 대기 시간 단축
+                except:
+                    continue
+            
             if self.gui_logger:
-                self.gui_logger(f"✅ 객관식 {selected_count}개, 주관식 {text_count}개, 이메일 {email_count}개 자동 답변 완료")
+                self.gui_logger(f"✅ 객관식 {selected_count}개, 주관식 {text_count}개, 이메일 {email_count}개, textarea {textarea_count}개 자동 답변 완료")
             
             return True
             

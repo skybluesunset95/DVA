@@ -791,7 +791,7 @@ class DoctorBillAutomation:
         threading.Thread(target=self._auto_collect_seminar_after_login, daemon=True).start()
     
     def _auto_collect_seminar_after_login(self):
-        """로그인 완료 후 세미나 정보 자동 수집"""
+        """로그인 완료 후 세미나 정보 자동 수집 및 설문참여 자동 실행"""
         try:
             # 로그인 완료까지 대기 (최대 30초)
             max_wait_time = 30
@@ -806,6 +806,15 @@ class DoctorBillAutomation:
                     
                     # 세미나 정보 수집
                     self._collect_seminar_info_for_main_gui()
+                    
+                    # 세미나 정보 수집 완료 후 설문참여 모듈 자동 실행
+                    self.log_message("설문참여를 자동으로 시작합니다...")
+                    self.update_status("설문참여 중...")
+                    
+                    # 설문참여 모듈 실행
+                    gui_callbacks = self.get_callbacks()
+                    self.task_manager.execute_module_by_config('survey', gui_callbacks)
+                    
                     break
                 
                 time.sleep(wait_interval)
