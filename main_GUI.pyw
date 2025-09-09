@@ -6,6 +6,8 @@ import time
 import sys
 import locale
 import logging
+import json
+import os
 from datetime import datetime
 from main_task_manager import TaskManager
 from modules.base_module import (
@@ -25,6 +27,20 @@ class DoctorBillAutomation:
         self.root.geometry("1000x800")  # 창 크기 확대
         self.root.minsize(800, 600)  # 최소 창 크기 설정
         self.root.configure(bg='#f0f0f0')
+        
+        # 설정 파일 경로
+        self.settings_file = "settings.json"
+        
+        # 기본 설정값 정의
+        self.default_settings = {
+            'auto_attendance': True,             # 자동 출석체크
+            'auto_quiz': True,                   # 자동 문제풀기
+            'auto_seminar_check': True,          # 자동 라이브세미나 현황 열기
+            'auto_survey': True                  # 자동 설문참여
+        }
+        
+        # 설정 로드
+        self.settings = self.load_settings()
         
         # TaskManager 초기화
         self.task_manager = TaskManager()
@@ -87,23 +103,6 @@ class DoctorBillAutomation:
         )
         self.settings_button.pack(side='right', padx=(10, 0))
         
-        # 디버그 정보 버튼 (설정 버튼 왼쪽에)
-        self.debug_button = tk.Button(
-            self.title_frame,
-            text="🔍",
-            font=("맑은 고딕", 12),
-            bg='#e74c3c',
-            fg='white',
-            activebackground='#c0392b',
-            activeforeground='white',
-            borderwidth=0,
-            relief='flat',
-            cursor='hand2',
-            width=3,
-            height=1,
-            command=self.show_debug_info
-        )
-        self.debug_button.pack(side='right', padx=(10, 0))
         
         # 사용자 정보 대시보드 패널
         self.info_panel = tk.Frame(self.main_frame, bg='#ffffff', relief='solid', borderwidth=1)
@@ -176,18 +175,6 @@ class DoctorBillAutomation:
         }
         
         # 왼쪽 프레임을 pack 방식으로 변경하여 버튼들이 균등하게 배치되도록 함
-        # 로그인 버튼
-        self.login_button = tk.Button(
-            self.left_frame,
-            text="🔑 자동 로그인",
-            bg='#3498db',
-            fg='white',
-            activebackground='#2980b9',
-            activeforeground='white',
-            command=self.auto_login,
-            **button_style
-        )
-        self.login_button.pack(fill='x', padx=10, pady=(10, 8))
         
         # 출석체크 버튼
         self.attendance_button = tk.Button(
@@ -200,7 +187,7 @@ class DoctorBillAutomation:
             command=self.attendance_check,
             **button_style
         )
-        self.attendance_button.pack(fill='x', padx=10, pady=8)
+        self.attendance_button.pack(fill='x', padx=10, pady=(10, 8))
         
         # 퀴즈풀기 버튼
         self.quiz_button = tk.Button(
@@ -268,6 +255,44 @@ class DoctorBillAutomation:
         
         # 프로그램 종료 시 정리 작업
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def load_settings(self):
+        """설정 파일에서 설정값을 로드합니다."""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                # 기본 설정과 병합 (새로운 설정이 추가되어도 안전)
+                merged_settings = self.default_settings.copy()
+                merged_settings.update(settings)
+                return merged_settings
+            else:
+                # 설정 파일이 없으면 기본값으로 생성
+                self.save_settings(self.default_settings)
+                return self.default_settings.copy()
+        except Exception as e:
+            self.log_error(f"설정 로드 실패: {str(e)}")
+            return self.default_settings.copy()
+    
+    def save_settings(self, settings=None):
+        """설정값을 파일에 저장합니다."""
+        try:
+            if settings is None:
+                settings = self.settings
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            self.log_success("설정이 저장되었습니다.")
+        except Exception as e:
+            self.log_error(f"설정 저장 실패: {str(e)}")
+    
+    def get_setting(self, key):
+        """특정 설정값을 가져옵니다."""
+        return self.settings.get(key, self.default_settings.get(key, False))
+    
+    def set_setting(self, key, value):
+        """특정 설정값을 설정합니다."""
+        self.settings[key] = value
+        self.save_settings()
     
     def setup_logging(self):
         """로깅 설정 - 모듈들의 로그를 GUI에 표시"""
@@ -479,7 +504,6 @@ class DoctorBillAutomation:
         """버튼 호버 효과를 설정합니다."""
         # 호버 효과를 위한 색상 매핑
         hover_colors = {
-            '🔑 자동 로그인': '#2980b9',
             '✅ 출석체크': '#229954',
             '🧠 퀴즈풀기': '#c0392b',
             '📺 라이브세미나': '#8e44ad',
@@ -497,7 +521,6 @@ class DoctorBillAutomation:
     def restore_button_color(self, button, button_text):
         """버튼의 원래 색상을 복원합니다."""
         original_colors = {
-            '🔑 자동 로그인': '#3498db',
             '✅ 출석체크': '#27ae60',
             '🧠 퀴즈풀기': '#e74c3c',
             '📺 라이브세미나': '#9b59b6',
@@ -691,52 +714,67 @@ class DoctorBillAutomation:
                 self.settings_window.destroy()
                 delattr(self, 'settings_window')
             
-            # 간단한 설정 창 생성 (나중에 확장 예정)
+            # 설정 창 생성
             self.settings_window = tk.Toplevel(self.root)
-            self.settings_window.title("설정")
-            self.settings_window.geometry("400x300")
+            self.settings_window.title("⚙️ 설정")
+            self.settings_window.geometry("500x600")
             self.settings_window.configure(bg='#f0f0f0')
             self.settings_window.resizable(False, False)
             self.settings_window.transient(self.root)
             self.settings_window.grab_set()
             
-            # 간단한 설정 내용
+            # 메인 프레임
             main_frame = tk.Frame(self.settings_window, bg='#f0f0f0')
             main_frame.pack(expand=True, fill='both', padx=20, pady=20)
             
+            # 제목
             title_label = tk.Label(
                 main_frame,
-                text="⚙️ 설정",
-                font=("맑은 고딕", 16, "bold"),
+                text="⚙️ 프로그램 설정",
+                font=("맑은 고딕", 18, "bold"),
                 bg='#f0f0f0',
                 fg='#2c3e50'
             )
             title_label.pack(pady=(0, 20))
             
-            info_label = tk.Label(
-                main_frame,
-                text="설정 기능은 준비 중입니다.\n\n나중에 다시 구현할 예정입니다.",
-                font=("맑은 고딕", 12),
-                bg='#f0f0f0',
-                fg='#7f8c8d',
-                justify='center'
-            )
-            info_label.pack(expand=True)
+            # 설정 옵션들 (스크롤 없이)
+            self.setup_settings_options(main_frame)
             
-            close_button = tk.Button(
-                main_frame,
-                text="닫기",
-                font=("맑은 고딕", 12),
-                bg='#95a5a6',
+            # 버튼 프레임 (하단 중앙 정렬)
+            button_frame = tk.Frame(main_frame, bg='#f0f0f0')
+            button_frame.pack(fill='x', pady=(30, 0))
+            
+            # 저장 버튼
+            save_button = tk.Button(
+                button_frame,
+                text="💾 저장",
+                font=("맑은 고딕", 12, "bold"),
+                bg='#27ae60',
                 fg='white',
-                activebackground='#7f8c8d',
+                activebackground='#229954',
+                activeforeground='white',
+                borderwidth=0,
+                relief='flat',
+                cursor='hand2',
+                command=self.save_settings_from_ui
+            )
+            save_button.pack(side='left', padx=(0, 10))
+            
+            # 닫기 버튼
+            close_button = tk.Button(
+                button_frame,
+                text="❌ 닫기",
+                font=("맑은 고딕", 12, "bold"),
+                bg='#e74c3c',
+                fg='white',
+                activebackground='#c0392b',
                 activeforeground='white',
                 borderwidth=0,
                 relief='flat',
                 cursor='hand2',
                 command=self.close_settings_window
             )
-            close_button.pack(pady=(20, 0))
+            close_button.pack(side='left')
             
             # X 버튼 클릭 시 close_settings_window 함수 호출
             self.settings_window.protocol("WM_DELETE_WINDOW", self.close_settings_window)
@@ -744,6 +782,111 @@ class DoctorBillAutomation:
         except Exception as e:
             self.handle_error('gui', f"설정 창 열기 실패: {str(e)}")
             messagebox.showerror("오류", f"설정 창을 열 수 없습니다: {str(e)}")
+    
+    def setup_settings_options(self, parent):
+        """설정 옵션들을 설정합니다."""
+        # 설정 변수들 (체크박스 상태를 저장)
+        self.setting_vars = {}
+        
+        
+        # 자동 실행 설정 섹션
+        auto_frame = tk.LabelFrame(
+            parent,
+            text="🤖 자동 실행 설정",
+            font=("맑은 고딕", 12, "bold"),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            padx=10,
+            pady=10
+        )
+        auto_frame.pack(fill='x', pady=(0, 15))
+        
+        # 자동 출석체크
+        self.setting_vars['auto_attendance'] = tk.BooleanVar(value=self.get_setting('auto_attendance'))
+        attendance_check = tk.Checkbutton(
+            auto_frame,
+            text="✅ 자동 출석체크",
+            variable=self.setting_vars['auto_attendance'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        attendance_check.pack(anchor='w', pady=2)
+        
+        # 자동 문제풀기
+        self.setting_vars['auto_quiz'] = tk.BooleanVar(value=self.get_setting('auto_quiz'))
+        quiz_check = tk.Checkbutton(
+            auto_frame,
+            text="🧠 자동 문제풀기",
+            variable=self.setting_vars['auto_quiz'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        quiz_check.pack(anchor='w', pady=2)
+        
+        # 자동 라이브세미나 현황 열기
+        self.setting_vars['auto_seminar_check'] = tk.BooleanVar(value=self.get_setting('auto_seminar_check'))
+        seminar_check = tk.Checkbutton(
+            auto_frame,
+            text="📺 자동 라이브세미나 현황 열기",
+            variable=self.setting_vars['auto_seminar_check'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        seminar_check.pack(anchor='w', pady=2)
+        
+        # 자동 설문참여
+        self.setting_vars['auto_survey'] = tk.BooleanVar(value=self.get_setting('auto_survey'))
+        survey_check = tk.Checkbutton(
+            auto_frame,
+            text="📋 자동 설문참여",
+            variable=self.setting_vars['auto_survey'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        survey_check.pack(anchor='w', pady=2)
+        
+        
+        # 설명 텍스트
+        info_text = tk.Text(
+            parent,
+            height=4,
+            width=50,
+            font=("맑은 고딕", 10),
+            bg='#ffffff',
+            fg='#7f8c8d',
+            relief='solid',
+            borderwidth=1,
+            wrap='word'
+        )
+        info_text.pack(fill='x', pady=(0, 10))
+        info_text.insert('1.0', "💡 설정 안내:\n• 자동 실행 설정은 프로그램 시작 시에만 적용됩니다.")
+        info_text.config(state='disabled')
+    
+    def save_settings_from_ui(self):
+        """UI에서 설정값을 저장합니다."""
+        try:
+            # UI의 체크박스 값들을 설정에 반영
+            for key, var in self.setting_vars.items():
+                self.set_setting(key, var.get())
+            
+            self.log_success("설정이 저장되었습니다.")
+            messagebox.showinfo("설정 저장", "설정이 성공적으로 저장되었습니다!")
+            
+        except Exception as e:
+            self.handle_error('gui', f"설정 저장 실패: {str(e)}")
+            messagebox.showerror("오류", f"설정 저장에 실패했습니다: {str(e)}")
     
     def close_settings_window(self):
         """설정 창을 닫습니다."""
@@ -791,7 +934,7 @@ class DoctorBillAutomation:
         threading.Thread(target=self._auto_collect_seminar_after_login, daemon=True).start()
     
     def _auto_collect_seminar_after_login(self):
-        """로그인 완료 후 세미나 정보 자동 수집 및 설문참여 자동 실행"""
+        """로그인 완료 후 설정에 따른 자동 작업 실행"""
         try:
             # 로그인 완료까지 대기 (최대 30초)
             max_wait_time = 30
@@ -801,19 +944,10 @@ class DoctorBillAutomation:
             while waited_time < max_wait_time:
                 if not self.task_manager.state.is_logging_in:
                     # 로그인 완료됨
-                    self.log_message("로그인 완료! 세미나 정보를 자동으로 수집합니다...")
-                    self.update_status("세미나 정보 수집 중...")
+                    self.log_message("로그인 완료! 설정에 따른 자동 작업을 시작합니다...")
                     
-                    # 세미나 정보 수집
-                    self._collect_seminar_info_for_main_gui()
-                    
-                    # 세미나 정보 수집 완료 후 설문참여 모듈 자동 실행
-                    self.log_message("설문참여를 자동으로 시작합니다...")
-                    self.update_status("설문참여 중...")
-                    
-                    # 설문참여 모듈 실행
-                    gui_callbacks = self.get_callbacks()
-                    self.task_manager.execute_module_by_config('survey', gui_callbacks)
+                    # 설정에 따른 자동 작업 실행
+                    self._execute_auto_tasks_after_login()
                     
                     break
                 
@@ -821,10 +955,56 @@ class DoctorBillAutomation:
                 waited_time += wait_interval
             
             if waited_time >= max_wait_time:
-                self.log_message("로그인 대기 시간 초과. 세미나 정보는 수동으로 수집해주세요.")
+                self.log_message("로그인 대기 시간 초과. 수동으로 작업을 실행해주세요.")
                 
         except Exception as e:
-            self.handle_error('data', f"세미나 자동 수집 중 오류: {str(e)}")
+            self.handle_error('data', f"자동 작업 실행 중 오류: {str(e)}")
+    
+    def _execute_auto_tasks_after_login(self):
+        """로그인 후 설정에 따른 자동 작업들을 실행합니다."""
+        try:
+            gui_callbacks = self.get_callbacks()
+            
+            # 1. 세미나 정보 수집 (항상 실행)
+            self.log_message("세미나 정보를 수집합니다...")
+            self.update_status("세미나 정보 수집 중...")
+            self._collect_seminar_info_for_main_gui()
+            
+            # 2. 자동 출석체크
+            if self.get_setting('auto_attendance'):
+                self.log_message("자동 출석체크를 시작합니다...")
+                self.update_status("자동 출석체크 중...")
+                self.task_manager.execute_attendance(gui_callbacks)
+                time.sleep(2)  # 작업 간 대기
+            
+            # 3. 자동 문제풀기
+            if self.get_setting('auto_quiz'):
+                self.log_message("자동 문제풀기를 시작합니다...")
+                self.update_status("자동 문제풀기 중...")
+                self.task_manager.execute_quiz(gui_callbacks)
+                time.sleep(2)  # 작업 간 대기
+            
+            # 4. 자동 라이브세미나 현황 열기
+            if self.get_setting('auto_seminar_check'):
+                self.log_message("자동 라이브세미나 현황을 확인합니다...")
+                self.update_status("라이브세미나 현황 확인 중...")
+                self.task_manager.execute_seminar(gui_callbacks)
+                time.sleep(2)  # 작업 간 대기
+            
+            # 5. 자동 설문참여
+            if self.get_setting('auto_survey'):
+                self.log_message("자동 설문참여를 시작합니다...")
+                self.update_status("자동 설문참여 중...")
+                self.task_manager.execute_survey(gui_callbacks)
+                time.sleep(2)  # 작업 간 대기
+            
+            
+            self.log_message("모든 자동 작업이 완료되었습니다!")
+            self.update_status("자동 작업 완료")
+            
+        except Exception as e:
+            self.handle_error('data', f"자동 작업 실행 중 오류: {str(e)}")
+    
     
     def _collect_seminar_info_for_main_gui(self):
         """메인 GUI용 세미나 정보 수집"""
@@ -1180,31 +1360,6 @@ class DoctorBillAutomation:
             except:
                 pass
     
-    def get_task_manager_status(self):
-        """TaskManager 상태 정보를 가져옵니다."""
-        try:
-            status = self.task_manager.state.get_status_summary()
-            self.log_message(f"📊 TaskManager 상태: {status}")
-            return status
-        except Exception as e:
-            self.handle_error('data', f"상태 정보 가져오기 실패: {str(e)}")
-            return None
-    
-    def get_cache_info(self):
-        """캐시 정보를 가져옵니다."""
-        try:
-            cache_info = self.task_manager.get_cache_info()
-            self.log_message(f"💾 캐시 정보: {cache_info}")
-            return cache_info
-        except Exception as e:
-            self.handle_error('data', f"캐시 정보 가져오기 실패: {str(e)}")
-            return None
-    
-    def show_debug_info(self):
-        """디버그 정보를 표시합니다."""
-        self.log_message("🔍 디버그 정보를 가져오는 중...")
-        self.get_task_manager_status()
-        self.get_cache_info()
 
 
 def main():
