@@ -645,6 +645,41 @@ class SeminarModule(BaseModule):
                              bg=WINDOW_BG, fg='#7f8c8d')
         desc_label.pack(pady=5)
         
+        # 버튼 프레임 생성 (트리뷰 위에)
+        button_frame = tk.Frame(window, bg=WINDOW_BG)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # 버튼들 생성 (순서: 선택신청, 선택취소, 신청가능선택, 모두신청)
+        btn_select_apply = tk.Button(button_frame, text="선택신청", 
+                                    font=("맑은 고딕", 10, "bold"),
+                                    bg='#6c757d', fg='white',
+                                    width=10, height=1)
+        btn_select_apply.pack(side=tk.LEFT, padx=3)
+        
+        btn_select_cancel = tk.Button(button_frame, text="선택취소", 
+                                     font=("맑은 고딕", 10, "bold"),
+                                     bg='#6c757d', fg='white',
+                                     width=10, height=1)
+        btn_select_cancel.pack(side=tk.LEFT, padx=3)
+        
+        btn_available_select = tk.Button(button_frame, text="신청가능선택", 
+                                        font=("맑은 고딕", 10, "bold"),
+                                        bg='#6c757d', fg='white',
+                                        width=10, height=1)
+        btn_available_select.pack(side=tk.LEFT, padx=3)
+        
+        btn_clear_all = tk.Button(button_frame, text="체크초기화", 
+                                 font=("맑은 고딕", 10, "bold"),
+                                 bg='#6c757d', fg='white',
+                                 width=10, height=1)
+        btn_clear_all.pack(side=tk.LEFT, padx=3)
+        
+        # 버튼 이벤트 연결
+        btn_select_apply.config(command=lambda: self.process_checked_seminars(tree, "apply"))
+        btn_select_cancel.config(command=lambda: self.process_checked_seminars(tree, "cancel"))
+        btn_available_select.config(command=lambda: self.manage_checkboxes(tree, "select_available"))
+        btn_clear_all.config(command=lambda: self.manage_checkboxes(tree, "clear_all"))
+        
         # 프레임 생성
         main_frame = tk.Frame(window, bg=WINDOW_BG)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -1229,3 +1264,208 @@ class SeminarModule(BaseModule):
     def get_setting(self, key, default=None):
         """특정 설정값을 반환합니다."""
         return self.settings.get(key, default)
+    
+    def get_checked_seminars(self, tree):
+        """체크된 세미나들의 정보를 수집"""
+        checked_seminars = []
+        
+        try:
+            for item in tree.get_children():
+                values = tree.item(item, "values")
+                tags = tree.item(item, "tags")
+                
+                # 체크박스가 체크된 항목인지 확인
+                if len(values) > 0 and values[0] == "☑":
+                    # 날짜 구분선은 제외
+                    if 'date_separator' not in tags:
+                        # 세미나 정보 추출
+                        seminar_info = {
+                            'title': values[4] if len(values) > 4 else '',  # 강의명
+                            'date': values[1] if len(values) > 1 else '',    # 날짜
+                            'time': values[3] if len(values) > 3 else '',    # 시간
+                            'status': values[7] if len(values) > 7 else '',  # 신청상태
+                            'detail_link': tags[0] if len(tags) > 0 else '', # 상세 링크
+                            'status_tag': None
+                        }
+                        
+                        # 상태 태그 찾기
+                        for tag in tags:
+                            if tag in ['신청가능', '신청완료', '신청마감', '입장하기', '대기중']:
+                                seminar_info['status_tag'] = tag
+                                break
+                        
+                        checked_seminars.append(seminar_info)
+            
+            self._log(f"체크된 세미나 {len(checked_seminars)}개 발견")
+            return checked_seminars
+            
+        except Exception as e:
+            self._log(f"체크된 세미나 수집 중 오류: {str(e)}")
+            return []
+    
+    def process_checked_seminars(self, tree, action_type):
+        """체크된 세미나들 일괄 처리 (신청/취소)"""
+        try:
+            # 1. 체크된 세미나 수집
+            checked_seminars = self.get_checked_seminars(tree)
+            
+            if not checked_seminars:
+                self._log("체크된 세미나가 없습니다.")
+                return
+            
+            # 2. 액션별 처리
+            success_count = 0
+            fail_count = 0
+            
+            for i, seminar in enumerate(checked_seminars, 1):
+                try:
+                    # 진행 상황 표시
+                    self._log(f"[{i}/{len(checked_seminars)}] {seminar['title']} 처리 중...")
+                    
+                    # 상태별 처리
+                    if action_type == "apply":
+                        # 신청 가능한 세미나만 신청
+                        if seminar['status_tag'] == '신청가능':
+                            success = self._process_seminar_apply(seminar)
+                        else:
+                            self._log(f"⚠ {seminar['title']} - 신청 불가능한 상태 ({seminar['status_tag']})")
+                            success = False
+                            
+                    elif action_type == "cancel":
+                        # 신청 완료된 세미나만 취소
+                        if seminar['status_tag'] == '신청완료':
+                            success = self._process_seminar_cancel(seminar)
+                        else:
+                            self._log(f"⚠ {seminar['title']} - 취소 불가능한 상태 ({seminar['status_tag']})")
+                            success = False
+                    
+                    # 결과 카운트
+                    if success:
+                        success_count += 1
+                        self._log(f"✅ {seminar['title']} {action_type} 완료")
+                    else:
+                        fail_count += 1
+                        self._log(f"❌ {seminar['title']} {action_type} 실패")
+                    
+                    # 처리 간 잠시 대기
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    fail_count += 1
+                    self._log(f"❌ {seminar['title']} 처리 중 오류: {str(e)}")
+            
+            # 3. 결과 요약
+            self._log(f"🎉 처리 완료! 성공: {success_count}개, 실패: {fail_count}개")
+            
+            # 4. 현황판 업데이트
+            if success_count > 0 or fail_count > 0:
+                self._log("🔄 현황판 업데이트 중...")
+                try:
+                    # 라이브세미나 페이지로 다시 이동
+                    self.web_automation.driver.get(SEMINAR_URL)
+                    
+                    # 페이지 로딩 대기
+                    self.web_automation.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, LOADING_SELECTOR)))
+                    
+                    # 새로운 세미나 정보 수집
+                    new_seminars = self.get_seminar_info()
+                    
+                    if new_seminars:
+                        # 기존 트리뷰 데이터 삭제
+                        for item in tree.get_children():
+                            tree.delete(item)
+                        
+                        # 새로운 데이터 삽입
+                        self._insert_seminar_data(tree, new_seminars)
+                        
+                        self._log(f"✅ 현황판 업데이트 완료 (총 {len(new_seminars)}개 세미나)")
+                    else:
+                        self._log("⚠ 업데이트할 세미나 정보를 찾을 수 없습니다")
+                        
+                except Exception as e:
+                    self._log(f"❌ 현황판 업데이트 실패: {str(e)}")
+            
+        except Exception as e:
+            self._log(f"일괄 처리 중 오류: {str(e)}")
+    
+    def _process_seminar_apply(self, seminar):
+        """개별 세미나 신청 처리"""
+        try:
+            # 세미나 상세 페이지로 이동
+            detail_link = seminar['detail_link']
+            if detail_link.startswith('/'):
+                detail_link = DOCTORVILLE_BASE_URL + detail_link
+            
+            self.web_automation.driver.get(detail_link)
+            
+            # 페이지 로딩 대기
+            self.web_automation.wait.until(EC.presence_of_element_located((By.ID, "applyLiveSeminarMemberBtn")))
+            
+            # 신청 버튼 클릭
+            return self._click_button_with_fallback(
+                BUTTON_CONFIGS['seminar_apply'],
+                self._handle_popup_confirmations
+            )
+            
+        except Exception as e:
+            self._log(f"세미나 신청 처리 중 오류: {str(e)}")
+            return False
+    
+    def _process_seminar_cancel(self, seminar):
+        """개별 세미나 취소 처리"""
+        try:
+            # 세미나 상세 페이지로 이동
+            detail_link = seminar['detail_link']
+            if detail_link.startswith('/'):
+                detail_link = DOCTORVILLE_BASE_URL + detail_link
+            
+            self.web_automation.driver.get(detail_link)
+            
+            # 페이지 로딩 대기
+            self.web_automation.wait.until(EC.presence_of_element_located((By.ID, "cancelLiveSeminarMemberBtn")))
+            
+            # 취소 버튼 클릭
+            return self._click_button_with_fallback(
+                BUTTON_CONFIGS['seminar_cancel'],
+                self._handle_cancel_confirmations
+            )
+            
+        except Exception as e:
+            self._log(f"세미나 취소 처리 중 오류: {str(e)}")
+            return False
+    
+    def manage_checkboxes(self, tree, action_type):
+        """체크박스 관리 (신청가능선택/체크초기화)"""
+        try:
+            processed_count = 0
+            
+            for item in tree.get_children():
+                values = tree.item(item, "values")
+                tags = tree.item(item, "tags")
+                
+                # 날짜 구분선은 제외
+                if 'date_separator' not in tags:
+                    should_process = False
+                    
+                    if action_type == "select_available":
+                        # 신청가능 상태인지 확인
+                        should_process = len(values) > 7 and '신청가능' in values[7]
+                        
+                    elif action_type == "clear_all":
+                        # 체크된 항목인지 확인
+                        should_process = len(values) > 0 and values[0] == "☑"
+                    
+                    if should_process:
+                        new_values = list(values)
+                        new_values[0] = "☑" if action_type == "select_available" else "☐"
+                        tree.item(item, values=new_values)
+                        processed_count += 1
+            
+            # 결과 로깅
+            if action_type == "select_available":
+                self._log(f"✅ 신청가능 세미나 {processed_count}개 체크 완료")
+            else:
+                self._log(f"✅ 체크된 항목 {processed_count}개 초기화 완료")
+                
+        except Exception as e:
+            self._log(f"❌ 체크박스 관리 중 오류: {str(e)}")
