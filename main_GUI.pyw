@@ -22,7 +22,7 @@ class DoctorBillAutomation:
     def __init__(self, root):
         self.root = root
         self.root.title("닥터빌 자동화 프로그램")
-        self.root.geometry("1000x700")  # 창 크기 확대
+        self.root.geometry("1000x800")  # 창 크기 확대
         self.root.minsize(800, 600)  # 최소 창 크기 설정
         self.root.configure(bg='#f0f0f0')
         
@@ -429,44 +429,51 @@ class DoctorBillAutomation:
         self.seminar_info_frame = tk.Frame(self.right_bottom_frame, bg='#ffffff', relief='solid', borderwidth=1)
         self.seminar_info_frame.pack(fill='both', expand=True, padx=10)
         
-        # 세미나 정보 텍스트
-        self.seminar_text = tk.Text(
-            self.seminar_info_frame,
-            height=8,
-            width=60,
-            font=("맑은 고딕", 10),
-            bg='#ffffff',
-            fg='#2c3e50',
-            relief='flat',
-            borderwidth=0,
-            wrap='word',
-            state='normal'
-        )
-        self.seminar_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # 트리뷰 생성 (체크박스 컬럼 제외하고 간소화)
+        columns = ('날짜', '요일', '시간', '강의명', '강의자', '신청인원', '신청상태')
+        self.seminar_tree = ttk.Treeview(self.seminar_info_frame, columns=columns, show='headings', height=8)
+        
+        # 컬럼 설정
+        self.seminar_tree.heading('날짜', text='날짜')
+        self.seminar_tree.heading('요일', text='요일')
+        self.seminar_tree.heading('시간', text='시간')
+        self.seminar_tree.heading('강의명', text='강의명')
+        self.seminar_tree.heading('강의자', text='강의자')
+        self.seminar_tree.heading('신청인원', text='신청인원')
+        self.seminar_tree.heading('신청상태', text='신청상태')
+        
+        # 컬럼 너비 설정 (메인 화면에 맞게 조정)
+        self.seminar_tree.column('날짜', width=70, anchor='center')
+        self.seminar_tree.column('요일', width=50, anchor='center')
+        self.seminar_tree.column('시간', width=80, anchor='center')
+        self.seminar_tree.column('강의명', width=200, anchor='w')
+        self.seminar_tree.column('강의자', width=120, anchor='w')
+        self.seminar_tree.column('신청인원', width=70, anchor='center')
+        self.seminar_tree.column('신청상태', width=80, anchor='center')
+        
+        # 스크롤바 추가
+        seminar_scrollbar = ttk.Scrollbar(self.seminar_info_frame, orient=tk.VERTICAL, command=self.seminar_tree.yview)
+        self.seminar_tree.configure(yscrollcommand=seminar_scrollbar.set)
+        
+        # 트리뷰와 스크롤바 배치
+        self.seminar_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=10)
+        seminar_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
         
         # 초기 메시지 표시
-        self.seminar_text.insert(tk.END, "📺 오늘의 세미나 정보\n\n")
-        self.seminar_text.insert(tk.END, "자동 로그인 후 세미나 정보가 자동으로 수집됩니다.\n\n")
-        self.seminar_text.insert(tk.END, "또는 아래 새로고침 버튼을 클릭하여\n수동으로 정보를 가져올 수 있습니다.")
+        self.seminar_tree.insert('', 'end', values=("", "", "", "자동 로그인 후 세미나 정보가 자동으로 수집됩니다", "", "", ""))
         
-        # 읽기 전용으로 변경
-        self.seminar_text.config(state='disabled')
+        # 상태별 색상 설정
+        self.seminar_tree.tag_configure('신청가능', background='#d5f4e6', foreground='#2e7d32')  # 연한 초록
+        self.seminar_tree.tag_configure('신청완료', background='#fef9e7', foreground='#f39c12')  # 연한 노랑
+        self.seminar_tree.tag_configure('신청마감', background='#fadbd8', foreground='#e74c3c')  # 연한 빨강
+        self.seminar_tree.tag_configure('입장하기', background='#d6eaf8', foreground='#3498db')  # 연한 파랑
+        self.seminar_tree.tag_configure('대기중', background='#f8f9fa', foreground='#6c757d')    # 연한 회색
+        self.seminar_tree.tag_configure('기타', background='#f4f6f6', foreground='#34495e')      # 기본색
         
-        # 세미나 새로고침 버튼
-        refresh_seminar_button = tk.Button(
-            self.right_bottom_frame,
-            text="🔄 세미나 새로고침",
-            font=("맑은 고딕", 10),
-            bg='#9b59b6',
-            fg='white',
-            activebackground='#8e44ad',
-            activeforeground='white',
-            borderwidth=0,
-            relief='flat',
-            cursor='hand2',
-            command=self.refresh_seminar
-        )
-        refresh_seminar_button.pack(pady=(10, 0))
+        # 더블클릭 이벤트
+        self.seminar_tree.bind('<Double-1>', self.on_seminar_double_click)
+        
     
     def setup_hover_effects(self):
         """버튼 호버 효과를 설정합니다."""
@@ -779,6 +786,64 @@ class DoctorBillAutomation:
         
         # TaskManager를 통해 로그인 실행
         self.task_manager.execute_login(gui_callbacks)
+        
+        # 로그인 완료 후 세미나 정보 자동 수집을 위한 스레드 시작
+        threading.Thread(target=self._auto_collect_seminar_after_login, daemon=True).start()
+    
+    def _auto_collect_seminar_after_login(self):
+        """로그인 완료 후 세미나 정보 자동 수집"""
+        try:
+            # 로그인 완료까지 대기 (최대 30초)
+            max_wait_time = 30
+            wait_interval = 0.5
+            waited_time = 0
+            
+            while waited_time < max_wait_time:
+                if not self.task_manager.state.is_logging_in:
+                    # 로그인 완료됨
+                    self.log_message("로그인 완료! 세미나 정보를 자동으로 수집합니다...")
+                    self.update_status("세미나 정보 수집 중...")
+                    
+                    # 세미나 정보 수집
+                    self._collect_seminar_info_for_main_gui()
+                    break
+                
+                time.sleep(wait_interval)
+                waited_time += wait_interval
+            
+            if waited_time >= max_wait_time:
+                self.log_message("로그인 대기 시간 초과. 세미나 정보는 수동으로 수집해주세요.")
+                
+        except Exception as e:
+            self.handle_error('data', f"세미나 자동 수집 중 오류: {str(e)}")
+    
+    def _collect_seminar_info_for_main_gui(self):
+        """메인 GUI용 세미나 정보 수집"""
+        try:
+            # 세미나 모듈을 직접 사용하여 정보 수집
+            from modules.seminar_module import SeminarModule
+            
+            if not self.task_manager.state.web_automation:
+                self.log_message("웹드라이버가 초기화되지 않았습니다.")
+                return
+            
+            # 세미나 모듈 생성
+            seminar_module = SeminarModule(self.task_manager.state.web_automation, self.log_message)
+            
+            # 세미나 정보만 수집 (GUI 창 표시 없음)
+            seminars = seminar_module.collect_seminar_info_only()
+            
+            if seminars:
+                self.log_message(f"세미나 정보 {len(seminars)}개 수집 완료!")
+                # 메인 GUI 트리뷰에 표시
+                self.update_today_seminars(seminars)
+            else:
+                self.log_message("수집할 세미나 정보가 없습니다.")
+                # 빈 상태로 업데이트
+                self.update_today_seminars([])
+                
+        except Exception as e:
+            self.handle_error('data', f"세미나 정보 수집 실패: {str(e)}")
     
     def attendance_check(self):
         """출석체크 기능"""
@@ -842,8 +907,39 @@ class DoctorBillAutomation:
         # 표준 GUI 콜백 생성
         gui_callbacks = self.get_callbacks()
         
-        # TaskManager를 통해 세미나 확인 실행
+        # TaskManager를 통해 세미나 확인 실행 (기존 창 표시 기능)
         self.task_manager.execute_seminar(gui_callbacks)
+        
+        # 추가로 메인 GUI 트리뷰도 업데이트
+        threading.Thread(target=self._update_main_gui_seminar_after_check, daemon=True).start()
+    
+    def _update_main_gui_seminar_after_check(self):
+        """라이브세미나 확인 후 메인 GUI 트리뷰 업데이트"""
+        try:
+            # 세미나 모듈을 직접 사용하여 정보 수집
+            from modules.seminar_module import SeminarModule
+            
+            if not self.task_manager.state.web_automation:
+                self.log_message("웹드라이버가 초기화되지 않았습니다.")
+                return
+            
+            # 세미나 모듈 생성
+            seminar_module = SeminarModule(self.task_manager.state.web_automation, self.log_message)
+            
+            # 세미나 정보만 수집 (GUI 창 표시 없음)
+            seminars = seminar_module.collect_seminar_info_only()
+            
+            if seminars:
+                self.log_message(f"메인 화면 세미나 정보 {len(seminars)}개 업데이트 완료!")
+                # 메인 GUI 트리뷰에 표시
+                self.update_today_seminars(seminars)
+            else:
+                self.log_message("수집할 세미나 정보가 없습니다.")
+                # 빈 상태로 업데이트
+                self.update_today_seminars([])
+                
+        except Exception as e:
+            self.handle_error('data', f"메인 GUI 세미나 정보 업데이트 실패: {str(e)}")
     
     def exit_program(self):
         """프로그램 종료"""
@@ -886,50 +982,194 @@ class DoctorBillAutomation:
         self.safe_gui_update(self.log_message, log_message)
         self.safe_gui_update(self.update_status, status_message)
     
-    def refresh_seminar(self):
-        """세미나 정보를 새로고침합니다."""
-        self.log_message("세미나 정보를 새로고침합니다...")
-        self.check_seminar()
     
     def update_today_seminars(self, seminars_data):
-        """오늘의 세미나 정보를 화면에 표시합니다."""
+        """오늘의 세미나 정보를 트리뷰에 표시합니다."""
         try:
-            # 세미나 텍스트 위젯을 편집 가능하게 변경
-            self.seminar_text.config(state='normal')
+            from datetime import datetime
             
-            # 기존 내용 지우기
-            self.seminar_text.delete(1.0, tk.END)
+            # 기존 데이터 삭제
+            for item in self.seminar_tree.get_children():
+                self.seminar_tree.delete(item)
             
             if not seminars_data:
-                self.seminar_text.insert(tk.END, "오늘 예정된 세미나가 없습니다.\n\n")
-                self.seminar_text.insert(tk.END, "📅 다음 세미나 일정을 확인해보세요.")
+                # 세미나가 없는 경우 메시지 표시
+                self.seminar_tree.insert('', 'end', values=("", "", "", "오늘 예정된 세미나가 없습니다", "", "", ""))
             else:
-                # 세미나 정보 표시
-                self.seminar_text.insert(tk.END, f"📅 오늘 예정된 세미나: {len(seminars_data)}개\n\n")
+                # 오늘 날짜만 필터링 (세미나 날짜 형식에 맞춤)
+                today = datetime.now()
+                today_md = f"{today.month}/{today.day}"  # M/D 형식으로 변환
+                    
+                # 디버깅: 세미나 데이터의 날짜 형식 확인
+                self.log_message(f"오늘 날짜 (M/D 형식): {today_md}")
+                if seminars_data:
+                    sample_dates = [s.get('date', '') for s in seminars_data[:3]]
+                    self.log_message(f"세미나 날짜 샘플: {sample_dates}")
                 
-                for i, seminar in enumerate(seminars_data[:10], 1):  # 최대 10개만 표시
-                    self.seminar_text.insert(tk.END, f"{i}. {seminar.get('title', '제목 없음')}\n")
-                    self.seminar_text.insert(tk.END, f"   ⏰ {seminar.get('time', '시간 미정')}\n")
-                    self.seminar_text.insert(tk.END, f"   📍 {seminar.get('location', '장소 미정')}\n\n")
+                today_seminars = [s for s in seminars_data if s.get('date', '') == today_md]
                 
-                if len(seminars_data) > 10:
-                    self.seminar_text.insert(tk.END, f"... 외 {len(seminars_data) - 10}개 더\n")
-            
-            # 다시 읽기 전용으로 변경
-            self.seminar_text.config(state='disabled')
+                if today_seminars:
+                    self.log_message(f"오늘 세미나 {len(today_seminars)}개 발견")
+                    # 오늘 세미나 데이터를 트리뷰에 삽입
+                    self._insert_seminar_data_to_main_tree(today_seminars)
+                else:
+                    self.log_message("오늘 예정된 세미나가 없습니다")
+                    self.seminar_tree.insert('', 'end', values=("", "", "", "오늘 예정된 세미나가 없습니다", "", "", ""))
             
         except Exception as e:
             self.handle_error('data', f"세미나 정보 표시 중 오류: {str(e)}")
     
+    def _insert_seminar_data_to_main_tree(self, seminars):
+        """메인 GUI 트리뷰에 세미나 데이터를 삽입합니다."""
+        try:
+            current_date = None
+            
+            for seminar in seminars:
+                # 날짜가 바뀌면 구분선 추가
+                if current_date != seminar.get('date', ''):
+                    current_date = seminar.get('date', '')
+                    if current_date:  # 날짜가 있는 경우에만 구분선 추가
+                        self.seminar_tree.insert('', 'end', values=(
+                            f"📅 {seminar.get('date', '')} {seminar.get('day', '')}",
+                            "", "", "", "", "", ""
+                        ), tags=('date_separator',))
+                
+                # 세미나 데이터 추가
+                self._insert_seminar_item_to_main_tree(seminar)
+            
+        except Exception as e:
+            self.handle_error('data', f"세미나 데이터 삽입 중 오류: {str(e)}")
+    
+    def _insert_seminar_item_to_main_tree(self, seminar):
+        """개별 세미나 항목을 메인 GUI 트리뷰에 삽입합니다."""
+        try:
+            status_tag = self._get_status_tag(seminar.get('status', ''))
+            
+            self.seminar_tree.insert('', 'end', values=(
+                seminar.get('date', ''),
+                seminar.get('day', ''),
+                seminar.get('time', ''),
+                seminar.get('title', ''),
+                seminar.get('lecturer', ''),
+                seminar.get('person', ''),
+                seminar.get('status', '')
+            ), tags=(seminar.get('detail_link', ''), status_tag))
+            
+        except Exception as e:
+            self.handle_error('data', f"세미나 항목 삽입 중 오류: {str(e)}")
+    
+    def _get_status_tag(self, status):
+        """신청상태에 따른 태그 반환"""
+        status_lower = status.lower().strip()
+        
+        if '신청가능' in status_lower or '신청' in status_lower and '가능' in status_lower:
+            return '신청가능'
+        elif '신청완료' in status_lower or '완료' in status_lower:
+            return '신청완료'
+        elif '신청마감' in status_lower or '마감' in status_lower:
+            return '신청마감'
+        elif '입장' in status_lower or '입장하기' in status_lower:
+            return '입장하기'
+        elif '대기' in status_lower or '대기중' in status_lower:
+            return '대기중'
+        else:
+            return '기타'
+    
     def clear_today_seminars(self):
         """오늘의 세미나 정보를 지웁니다."""
         try:
-            self.seminar_text.config(state='normal')
-            self.seminar_text.delete(1.0, tk.END)
-            self.seminar_text.insert(tk.END, "세미나 정보가 없습니다.\n\n새로고침 버튼을 클릭하여 정보를 가져오세요.")
-            self.seminar_text.config(state='disabled')
+            # 기존 데이터 삭제
+            for item in self.seminar_tree.get_children():
+                self.seminar_tree.delete(item)
+            
+            # 초기 메시지 표시
+            self.seminar_tree.insert('', 'end', values=("", "", "", "세미나 정보가 없습니다", "", "", ""))
         except Exception as e:
             self.handle_error('gui', f"세미나 정보 지우기 중 오류: {str(e)}")
+    
+    def on_seminar_double_click(self, event):
+        """세미나 트리뷰 더블클릭 이벤트 핸들러"""
+        try:
+            # 선택된 항목 확인
+            selection = self.seminar_tree.selection()
+            if not selection:
+                return
+            
+            item = selection[0]
+            tags = self.seminar_tree.item(item, "tags")
+            
+            # 날짜 구분선은 클릭 불가
+            if 'date_separator' in tags:
+                return
+            
+            # 첫 번째 태그가 링크인지 확인
+            if len(tags) > 0 and tags[0]:
+                detail_link = tags[0]
+                # 상대 경로인 경우 절대 경로로 변환
+                if detail_link.startswith('/'):
+                    detail_link = "https://www.doctorville.co.kr" + detail_link
+                
+                self.log_message("선택된 세미나 페이지로 이동합니다...")
+                
+                # 현재 탭에서 열기
+                if self.task_manager.state.web_automation and self.task_manager.state.web_automation.driver:
+                    self.task_manager.state.web_automation.driver.get(detail_link)
+                    self.log_message("세미나 상세 페이지로 이동 완료")
+                    
+                    # 세미나 상태에 따라 다른 동작 수행
+                    status_tag = None
+                    for tag in tags:
+                        if tag in ['신청가능', '신청완료', '신청마감', '입장하기', '대기중']:
+                            status_tag = tag
+                            break
+                    
+                    if status_tag:
+                        # 세미나 모듈 생성하여 상태별 액션 수행
+                        from modules.seminar_module import SeminarModule
+                        seminar_module = SeminarModule(self.task_manager.state.web_automation, self.log_message)
+                        
+                        if status_tag == '신청완료':
+                            self.log_message("세미나 신청취소를 시도합니다...")
+                            success = seminar_module.cancel_seminar()
+                        elif status_tag == '입장하기':
+                            self.log_message("세미나 입장을 시도합니다...")
+                            success = seminar_module.enter_seminar()
+                        else:
+                            self.log_message("세미나 신청을 시도합니다...")
+                            success = seminar_module.click_seminar_button()
+                        
+                        # 결과에 따른 로그
+                        if success:
+                            self.log_message("세미나 액션 완료!")
+                            # 액션 완료 후 잠시 대기
+                            import time
+                            time.sleep(0.5)
+                            
+                            # 메인 GUI 트리뷰 업데이트
+                            self._update_main_gui_seminar_after_check()
+                        else:
+                            self.log_message("세미나 액션 실패")
+                    else:
+                        self.log_message("세미나 상태를 확인할 수 없습니다")
+                else:
+                    self.log_message("웹드라이버가 초기화되지 않았습니다. 먼저 로그인해주세요.")
+                
+                # 선택된 항목 해제
+                self.seminar_tree.selection_remove(item)
+            else:
+                self.log_message("세미나 링크를 찾을 수 없습니다")
+                # 실패한 경우에도 선택 해제
+                self.seminar_tree.selection_remove(item)
+                        
+        except Exception as e:
+            self.handle_error('gui', f"세미나 더블클릭 처리 중 오류: {str(e)}")
+            # 예외 발생 시에도 선택 해제
+            try:
+                selection = self.seminar_tree.selection()
+                if selection:
+                    self.seminar_tree.selection_remove(selection[0])
+            except:
+                pass
     
     def get_task_manager_status(self):
         """TaskManager 상태 정보를 가져옵니다."""

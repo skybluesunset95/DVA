@@ -564,7 +564,7 @@ class SurveyModule(BaseModule):
                 except:
                     continue
             
-            # 2. 주관식 - 모든 텍스트 입력 필드에 "." 입력
+            # 2. 주관식 - 텍스트 입력 필드에 "." 입력
             text_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="text"]')
             text_count = 0
             
@@ -579,8 +579,23 @@ class SurveyModule(BaseModule):
                 except:
                     continue
             
+            # 3. 이메일 필드 - "a@gmail.com" 입력
+            email_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="email"]')
+            email_count = 0
+            
+            for email_input in email_inputs:
+                try:
+                    email_input.clear()
+                    email_input.send_keys("a@gmail.com")
+                    email_count += 1
+                    if self.gui_logger:
+                        self.gui_logger(f"이메일 {email_count}번 답변 입력 완료")
+                    time.sleep(0.02)  # 대기 시간 단축
+                except:
+                    continue
+            
             if self.gui_logger:
-                self.gui_logger(f"✅ 객관식 {selected_count}개, 주관식 {text_count}개 자동 답변 완료")
+                self.gui_logger(f"✅ 객관식 {selected_count}개, 주관식 {text_count}개, 이메일 {email_count}개 자동 답변 완료")
             
             return True
             

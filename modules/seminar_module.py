@@ -267,7 +267,7 @@ class SeminarModule(BaseModule):
     def __init__(self, web_automation, gui_logger=None):
         super().__init__(web_automation, gui_logger)
         
-        # 세미나 모듈 설정
+        # 세미나 모듈 설정 (기본값)
         self.settings = {
             'auto_apply': False,
             'refresh_interval': 30,
@@ -275,7 +275,6 @@ class SeminarModule(BaseModule):
             'auto_enter': False,
             'timeout': 10
         }
-        self.load_settings()
     
     def _log(self, message_key, **kwargs):
         """통일된 로깅 메서드 - 일반 메시지와 INFO 로그 모두 표시"""
@@ -1214,56 +1213,6 @@ class SeminarModule(BaseModule):
         except Exception as e:
             self._log('CANCEL_POPUP_ERROR', error=str(e))
     
-    # 설정 관리 메서드들
-    def load_settings(self):
-        """설정 파일에서 설정을 로드합니다."""
-        try:
-            import json
-            import os
-            
-            if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                    loaded_settings = json.load(f)
-                    self.settings.update(loaded_settings)
-                    self.logger.info("세미나 설정을 로드했습니다.")
-            else:
-                self.save_settings()  # 기본 설정으로 파일 생성
-                
-        except Exception as e:
-            self.logger.error(f"설정 로드 실패: {str(e)}")
-    
-    def save_settings(self):
-        """현재 설정을 파일에 저장합니다."""
-        try:
-            import json
-            
-            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.settings, f, indent=2, ensure_ascii=False)
-            
-            self.logger.info("세미나 설정을 저장했습니다.")
-            
-        except Exception as e:
-            self.logger.error(f"설정 저장 실패: {str(e)}")
-    
-    def update_settings(self, new_settings):
-        """설정을 업데이트하고 저장합니다."""
-        try:
-            self.settings.update(new_settings)
-            self.save_settings()
-            self.logger.info("세미나 설정이 업데이트되었습니다.")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"설정 업데이트 실패: {str(e)}")
-            return False
-    
-    def get_settings(self):
-        """현재 설정을 반환합니다."""
-        return self.settings.copy()
-    
-    def get_setting(self, key, default=None):
-        """특정 설정값을 반환합니다."""
-        return self.settings.get(key, default)
     
     def get_checked_seminars(self, tree):
         """체크된 세미나들의 정보를 수집"""
