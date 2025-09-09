@@ -218,7 +218,6 @@ chromedriver
 
 # 개인 설정 파일들
 config.ini
-settings.json
 *.log
 
 # 백업 파일들
