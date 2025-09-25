@@ -98,23 +98,34 @@ class SurveyModule(BaseModule):
                             self.web_automation.driver.back()
                             time.sleep(2)  # 페이지 로딩 대기
                             
-                            # 두 번째 세미나 클릭
-                            second_seminar = seminar_list[1]
-                            seminar_title = second_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
+                            # 페이지 이동 후 세미나 목록을 다시 찾기 (Stale Element Reference 방지)
+                            seminar_list = self.web_automation.driver.find_elements(
+                                By.CSS_SELECTOR, 
+                                ".live_list .list_cont a.list_detail"
+                            )
                             
-                            if self.gui_logger:
-                                self.gui_logger(f"두 번째 세미나 발견: {seminar_title}")
-                            
-                            second_seminar.click()
-                            
-                            if self.gui_logger:
-                                self.log_info("✅ 두 번째 세미나 자동 선택 완료")
-                                self.log_info("재입장하기 버튼을 찾는 중...")
-                            
-                            # 두 번째 세미나에서도 재입장 버튼 확인
-                            if not self.auto_click_reenter_button():
+                            if len(seminar_list) >= 2:
+                                # 두 번째 세미나 클릭
+                                second_seminar = seminar_list[1]
+                                seminar_title = second_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
+                                
                                 if self.gui_logger:
-                                    self.gui_logger("두 번째 세미나에도 재입장 버튼이 없습니다. 포인트 확인을 진행합니다...")
+                                    self.gui_logger(f"두 번째 세미나 발견: {seminar_title}")
+                                
+                                second_seminar.click()
+                                
+                                if self.gui_logger:
+                                    self.log_info("✅ 두 번째 세미나 자동 선택 완료")
+                                    self.log_info("재입장하기 버튼을 찾는 중...")
+                                
+                                # 두 번째 세미나에서도 재입장 버튼 확인
+                                if not self.auto_click_reenter_button():
+                                    if self.gui_logger:
+                                        self.gui_logger("두 번째 세미나에도 재입장 버튼이 없습니다. 포인트 확인을 진행합니다...")
+                                    self._run_points_check_module()
+                            else:
+                                if self.gui_logger:
+                                    self.gui_logger("두 번째 세미나가 없습니다. 포인트 확인을 진행합니다...")
                                 self._run_points_check_module()
                         else:
                             if self.gui_logger:
