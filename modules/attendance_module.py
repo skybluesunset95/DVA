@@ -15,7 +15,7 @@ from .base_module import BaseModule
 ATTENDANCE_PAGE_URL = "https://www.doctorville.co.kr/event/attend"
 
 # CSS 선택자 상수 정의
-ATTEND_BUTTON_ID = "attendBtn"
+ATTEND_BUTTON_CLASS = "point_down"
 SUCCESS_POPUP_ID = "popSuccessArea"
 
 # 대기 시간 상수 정의
@@ -24,7 +24,7 @@ DEFAULT_IMPLICIT_WAIT = 5
 # 에러 메시지 상수 정의
 ERROR_WEBDRIVER_NOT_INITIALIZED = "웹드라이버가 초기화되지 않았습니다."
 ERROR_ATTENDANCE_PAGE_NAVIGATION = "출석체크 페이지 이동 실패"
-ERROR_ATTEND_BUTTON_CLICK = "포인트 받기 버튼 클릭 실패"
+ERROR_ATTEND_BUTTON_CLICK = "출석하기 버튼 클릭 실패"
 ERROR_ATTENDANCE_EXECUTION = "출석체크 실행 중 오류 발생"
 
 class AttendanceModule(BaseModule):
@@ -44,7 +44,7 @@ class AttendanceModule(BaseModule):
             if not self._navigate_to_attendance_page():
                 return False
             
-            # 포인트 받기 버튼 클릭
+            # 출석하기 버튼 클릭
             if not self.click_attend_button():
                 return False
             
@@ -72,21 +72,21 @@ class AttendanceModule(BaseModule):
             return False
     
     def click_attend_button(self):
-        """포인트 받기 버튼 클릭 또는 이미 완료된 경우 확인"""
+        """출석하기 버튼 클릭 또는 이미 완료된 경우 확인"""
         try:
-            self.log_info("포인트 받기 버튼 찾는 중...")
+            self.log_info("출석하기 버튼 찾는 중...")
             
             # 암시적 대기를 일시적으로 0으로 설정 (즉시 검색)
             self.web_automation.driver.implicitly_wait(0)
             
             try:
-                # 포인트 받기 버튼을 즉시 찾기
-                button = self.web_automation.driver.find_element(By.ID, ATTEND_BUTTON_ID)
-                self.log_info("포인트 받기 버튼 발견")
+                # 출석하기 버튼을 즉시 찾기
+                button = self.web_automation.driver.find_element(By.CLASS_NAME, ATTEND_BUTTON_CLASS)
+                self.log_info("출석하기 버튼 발견")
                 
                 # 버튼 클릭
                 button.click()
-                self.log_info("포인트 받기 버튼 클릭 완료")
+                self.log_info("출석하기 버튼 클릭 완료")
                 
                 # 성공 팝업 확인
                 self._check_success_popup()
@@ -94,7 +94,7 @@ class AttendanceModule(BaseModule):
                 return True
                 
             except NoSuchElementException:
-                self.log_info("포인트 받기 버튼을 찾을 수 없습니다. (이미 출석체크 완료되었을 수 있습니다)")
+                self.log_info("출석하기 버튼을 찾을 수 없습니다. (이미 출석체크 완료되었을 수 있습니다)")
                 # 이미 완료된 경우에도 True 반환 (포인트 확인을 위해)
                 return True
             finally:
