@@ -125,7 +125,7 @@ class WebAutomation:
         self.driver.set_page_load_timeout(BROWSER_CONFIG['page_load_timeout'])
         
         # WebDriverWait 설정
-        self.wait = WebDriverWait(self.driver, 1)
+        self.wait = WebDriverWait(self.driver, 3)
         
         self.logger.info("웹드라이버가 성공적으로 설정되었습니다.")
         return True

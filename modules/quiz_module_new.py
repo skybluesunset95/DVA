@@ -18,6 +18,7 @@ INSTRUMENT_PAGE_URL = "https://www.doctorville.co.kr/product/instrumentList"
 QUIZ_CSS_SELECTOR = ".quiz_bg"
 QUIZ_BANNER_BUTTON_ID = "btn_quiz_banner"
 QUIZ_LAYER_POP_ID = "quizLayerPop"
+QUESTION_AREA_CONTAINER_ID = "questionArea"  # 퀴즈 문제 영역 컨테이너 (여기 안에서만 수집)
 PRODUCT_TITLE_ID = "product_title"
 PRODUCT_CATEGORY_ID = "product_categoryNm"
 PRODUCT_TITLE_ENG_ID = "product_titleEng"
@@ -457,13 +458,40 @@ class QuizModuleNew(BaseModule):
                 'questions': []
             }
             
-            # 문제들 수집
-            question_areas = self.web_automation.driver.find_elements(By.CSS_SELECTOR, QUESTION_AREA_SELECTOR)
+            # 퀴즈 문제 영역 컨테이너만 사용 (다른 영역의 .question_area 제외)
+            try:
+                quiz_container = self.web_automation.driver.find_element(By.ID, QUESTION_AREA_CONTAINER_ID)
+            except NoSuchElementException:
+                self.log_error(f"퀴즈 문제 영역(id={QUESTION_AREA_CONTAINER_ID})을 찾을 수 없습니다.")
+                return None
             
-            for i, question_area in enumerate(question_areas, 1):
+            # 실제 존재하는 문제 개수 확인 (.question1, .question2, ... 순으로 확인)
+            question_count = 0
+            for n in range(1, 10):
                 try:
-                    # 문제 번호
-                    question_number = question_area.find_element(By.CSS_SELECTOR, f".question{{}}".format(i)).text.strip()
+                    quiz_container.find_element(By.CSS_SELECTOR, f".question{n}")
+                    question_count = n
+                except NoSuchElementException:
+                    break
+            
+            if question_count == 0:
+                self.log_error("존재하는 퀴즈 문제(.questionN)를 찾을 수 없습니다.")
+                return None
+            
+            self.log_info(f"실제 퀴즈 문제 개수: {question_count}개")
+            
+            # 각 문제 번호(n)에 대해 해당 .question{n}을 포함한 .question_area만 수집
+            for n in range(1, question_count + 1):
+                try:
+                    question_num_elem = quiz_container.find_element(By.CSS_SELECTOR, f".question{n}")
+                    question_number = question_num_elem.text.strip()
+                    # .question{n}이 속한 .question_area 찾기 (closest)
+                    question_area = self.web_automation.driver.execute_script(
+                        "return arguments[0].closest('.question_area');", question_num_elem
+                    )
+                    if not question_area:
+                        self.log_error(f"문제 {n}: .question_area를 찾을 수 없습니다.")
+                        continue
                     
                     # 문제 내용
                     question_text = question_area.find_element(By.CSS_SELECTOR, QUESTION_TEXT_SELECTOR).text.strip()
@@ -477,7 +505,6 @@ class QuizModuleNew(BaseModule):
                         choice_value = choice.find_element(By.CSS_SELECTOR, CHOICE_INPUT_SELECTOR).get_attribute("value")
                         choice_list.append(f"{choice_value}. {choice_text}")
                     
-                    # choice_values 생성 (가독성을 위해 별도로 분리)
                     choice_values = []
                     for choice in choice_list:
                         if '. ' in choice:
@@ -485,7 +512,6 @@ class QuizModuleNew(BaseModule):
                         else:
                             choice_values.append(choice)
                     
-                    # 퀴즈 데이터에 추가
                     quiz_data['questions'].append({
                         'number': question_number,
                         'question': question_text,
@@ -500,7 +526,7 @@ class QuizModuleNew(BaseModule):
                     self.log_info(f"----------------")
                         
                 except Exception as e:
-                    self.log_error(f"문제 {i} 수집 중 오류: {str(e)}")
+                    self.log_error(f"문제 {n} 수집 중 오류: {str(e)}")
                     continue
             
             return quiz_data
@@ -548,7 +574,7 @@ class QuizModuleNew(BaseModule):
                     # 라디오 버튼 선택
                     radio_selector = f"input[name='an_{question_num[1:]}'][value='{correct_answer}']"
                     radio_button = self.web_automation.driver.find_element(By.CSS_SELECTOR, radio_selector)
-                    radio_button.click()
+                    self.web_automation.driver.execute_script("arguments[0].click();", radio_button)
                     
                     self.log_success(f"{question_num}: 답안 {correct_answer} 선택 완료")
                         
