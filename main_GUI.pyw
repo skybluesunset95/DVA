@@ -18,6 +18,7 @@ from modules.base_module import (
     STATUS_KEY_ATTENDANCE, 
     STATUS_KEY_QUIZ
 )
+from modules.survey_problem import open_survey_problem_manager
 
 
 class DoctorBillAutomation:
@@ -227,6 +228,19 @@ class DoctorBillAutomation:
             **button_style
         )
         self.survey_button.pack(fill='x', padx=10, pady=8)
+        
+        # 설문문제 버튼
+        self.survey_problem_button = tk.Button(
+            self.left_frame,
+            text="🎯 설문문제",
+            bg='#3498db',
+            fg='white',
+            activebackground='#2980b9',
+            activeforeground='white',
+            command=self.open_survey_problem,
+            **button_style
+        )
+        self.survey_problem_button.pack(fill='x', padx=10, pady=8)
         
         # 프로그램 종료 버튼
         self.exit_button = tk.Button(
@@ -1083,6 +1097,15 @@ class DoctorBillAutomation:
         except Exception as e:
             self.handle_error('webpage', f"설문참여 페이지 이동 중 오류: {str(e)}")
             self.update_status("설문참여 페이지 오류")
+    
+    def open_survey_problem(self):
+        """설문 문제 관리 창 열기"""
+        try:
+            self.log_message("설문 문제 관리 창을 열고 있습니다...")
+            open_survey_problem_manager(self.root, self.log_message)
+            self.log_message("✅ 설문 문제 관리 창이 열렸습니다.")
+        except Exception as e:
+            self.handle_error('gui', f"설문 문제 관리 창 오류: {str(e)}")
     
     def check_seminar(self):
         """라이브세미나 확인 기능"""

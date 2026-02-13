@@ -11,6 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from .base_module import BaseModule
+from .survey_problem import SurveyProblemManager
 
 # URL 상수 정의
 VOD_LIST_PAGE_URL = "https://www.doctorville.co.kr/seminar/seminarVodReplayList?categoryCd=&metaCd=&sort=apply&query="
@@ -30,6 +31,7 @@ ERROR_SURVEY_BUTTON_CLICK = "설문참여 버튼 클릭 실패"
 class SurveyModule(BaseModule):
     def __init__(self, web_automation, gui_logger=None):
         super().__init__(web_automation, gui_logger)
+        self.problem_manager = SurveyProblemManager()
     
     def execute(self):
         """설문참여 페이지로 이동하고 첫 번째 세미나 자동 선택"""
@@ -805,6 +807,28 @@ class SurveyModule(BaseModule):
                     if self.gui_logger:
                         self.log_info(f"문제 {question_number}번 처리 중...")
                     
+                    # 🔥 문제 제목 추출 (퀴즈 여부 판단용)
+                    question_text = ""
+                    try:
+                        # 실제 HTML 구조: li > label > div.whitespace-pre-wrap
+                        text_elem = question.find_element(By.CSS_SELECTOR, 'div.whitespace-pre-wrap')
+                        
+                        # div 안의 모든 텍스트 추출 (span[퀴즈] 포함)
+                        question_text = text_elem.text.strip() if text_elem else ""
+                        
+                        if not question_text:
+                            # 대체 선택자
+                            try:
+                                question_text = question.find_element(By.CSS_SELECTOR, 'label').text.strip()
+                            except:
+                                pass
+                    except:
+                        # 제목을 찾지 못한 경우 빈 문자열 사용
+                        question_text = ""
+                    
+                    # 문제 제목 정규화 (저장된 정답과 비교하기 위해)
+                    normalized_question = self._normalize_question_text(question_text)
+                    
                     # 각 질문에서 첫 번째 input/textarea 요소만 찾아서 유형별로 바로 처리
                     question_processed = False
                     
@@ -813,13 +837,81 @@ class SurveyModule(BaseModule):
                         first_input = question.find_element(By.CSS_SELECTOR, 'input, textarea')
                         input_type = first_input.get_attribute('type')
                         
+                        # 🔥 [퀴즈] 문제 여부 확인
+                        is_quiz = "[퀴즈]" in question_text
+                        quiz_answer = None
+                        
+                        if is_quiz:
+                            # 퀴즈 정답 조회 (원본 문제 텍스트로 - get_answer에서 정규화함)
+                            quiz_answer = self.problem_manager.get_answer(question_text)
+                            if self.gui_logger:
+                                if quiz_answer:
+                                    self.gui_logger(f"✅ 퀴즈 정답 발견: {normalized_question[:40]}... → {quiz_answer}")
+                                else:
+                                    self.gui_logger(f"⚠️ 퀴즈이지만 정답 미등록: {normalized_question[:45]}...")
+                        
                         if input_type == 'radio':
-                            # 라디오 버튼: 첫 번째 옵션 선택
-                            if not first_input.is_selected():
-                                first_input.click()
-                                if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: 라디오 버튼 첫 번째 옵션 선택")
-                                question_processed = True
+                            # 라디오 버튼: 퀴즈면 정답 선택, 아니면 첫 번째 옵션 선택
+                            if is_quiz and quiz_answer:
+                                # 퀴즈 정답에 해당하는 라디오 버튼 선택
+                                try:
+                                    radios = question.find_elements(By.CSS_SELECTOR, 'input[type="radio"]')
+                                    answer_value = str(quiz_answer).strip()
+                                    
+                                    radio_selected = False
+                                    
+                                    # 전략 1: 숫자 정답인 경우 (1, 2, 3, 4, 5 등)
+                                    if answer_value.isdigit():
+                                        answer_num = int(answer_value)
+                                        if 1 <= answer_num <= len(radios):
+                                            target_radio = radios[answer_num - 1]  # 0부터 시작하므로 -1
+                                            if not target_radio.is_selected():
+                                                target_radio.click()
+                                                if self.gui_logger:
+                                                    self.log_info(f"문제 {question_number}번: 퀴즈 정답 {answer_value}번 선택")
+                                                question_processed = True
+                                                radio_selected = True
+                                    
+                                    # 전략 2: 텍스트 정답인 경우 (O, X, 또는 선택지 문구)
+                                    if not radio_selected:
+                                        for idx, radio in enumerate(radios):
+                                            try:
+                                                # 라디오 버튼의 형제 span에서 텍스트 추출
+                                                label_elem = radio.find_element(By.XPATH, './ancestor::label')
+                                                option_text = label_elem.text.strip() if label_elem else ""
+                                                
+                                                # 정답과 선택지 텍스트 비교
+                                                if answer_value.upper() in option_text.upper() or option_text.upper() in answer_value.upper():
+                                                    if not radio.is_selected():
+                                                        radio.click()
+                                                        if self.gui_logger:
+                                                            self.log_info(f"문제 {question_number}번: 퀴즈 정답 '{answer_value}' 선택")
+                                                        question_processed = True
+                                                        radio_selected = True
+                                                    break
+                                            except:
+                                                continue
+                                    
+                                    # 정답을 찾지 못한 경우 첫 번째 선택
+                                    if not radio_selected:
+                                        if not first_input.is_selected():
+                                            first_input.click()
+                                            if self.gui_logger:
+                                                self.gui_logger(f"⚠️ 문제 {question_number}번: 퀴즈 정답 '{answer_value}' 미등록, 첫 번째 옵션 선택")
+                                            question_processed = True
+                                except Exception as e:
+                                    if self.gui_logger:
+                                        self.gui_logger(f"❌ 문제 {question_number}번 퀴즈 정답 선택 오류: {str(e)}")
+                                    if not first_input.is_selected():
+                                        first_input.click()
+                                        question_processed = True
+                            else:
+                                # 일반 문제: 첫 번째 옵션 선택
+                                if not first_input.is_selected():
+                                    first_input.click()
+                                    if self.gui_logger:
+                                        self.log_info(f"문제 {question_number}번: 라디오 버튼 첫 번째 옵션 선택")
+                                    question_processed = True
                                 
                         elif input_type == 'checkbox':
                             # 체크박스: 두 번째 체크박스 선택 (첫 번째는 sr-only)
@@ -882,6 +974,30 @@ class SurveyModule(BaseModule):
             if self.gui_logger:
                 self.gui_logger(f"❌ 문제 순서대로 처리 실패: {str(e)}")
             return False
+    
+    def _normalize_question_text(self, question: str) -> str:
+        """
+        문제 제목을 정규화합니다.
+        [퀴즈] 태그와 후행 특수문자(*, ?, 등)를 제거합니다.
+        
+        Args:
+            question: 원본 문제 텍스트
+        
+        Returns:
+            정규화된 문제 텍스트
+        """
+        import re
+        
+        # [퀴즈] 태그 제거
+        cleaned = question.replace("[퀴즈]", "").strip()
+        
+        # 후행 특수문자 제거 (*, ?, 공백 등)
+        cleaned = re.sub(r'[\*\?]+\s*$', '', cleaned).strip()
+        
+        # 여러 개의 공백을 단일 공백으로 정규화
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        
+        return cleaned
     
     def auto_select_first_options(self):
         """모든 질문의 첫 번째 보기를 자동으로 선택하고 텍스트 필드에 점을 입력합니다."""

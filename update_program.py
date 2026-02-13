@@ -98,6 +98,9 @@ class DoctorBillUpdater:
         # 보존할 파일 확장자들
         self.preserve_extensions = ['.bat', '.exe', '.ini', '.log', '.json', '.txt']
         
+        # 시작 시 기존 백업 폴더 정리 (오류 발생해도 무시)
+        self._cleanup_backup_initial()
+        
         # 업데이트할 파일/폴더들
         self.update_targets = [
             'main_GUI.pyw',
@@ -112,21 +115,54 @@ class DoctorBillUpdater:
         """상태 메시지 출력"""
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
     
+    def _cleanup_backup_initial(self):
+        """시작 시 기존 백업 폴더 정리"""
+        try:
+            self.safe_remove_tree(self.backup_dir)
+        except:
+            pass
+    
+    def safe_remove_tree(self, path):
+        """폴더를 안전하게 삭제 (권한 문제 무시)"""
+        import os
+        import stat
+        
+        def handle_remove_readonly(func, path, exc):
+            """읽기 전용 파일 삭제 핸들러"""
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            except:
+                pass
+        
+        try:
+            if path.exists():
+                shutil.rmtree(path, onerror=handle_remove_readonly)
+        except:
+            pass
+    
     def create_backup(self):
         """현재 파일들을 백업"""
         self.print_status("백업 생성 중...")
         
-        if self.backup_dir.exists():
-            shutil.rmtree(self.backup_dir)
+        # 기존 백업 폴더 안전하게 삭제
+        self.safe_remove_tree(self.backup_dir)
         
         self.backup_dir.mkdir()
         
-        # 모든 파일을 백업
+        # 모든 파일을 백업 (.git 제외)
         for item in self.current_dir.iterdir():
-            if item.is_file() and item.name != "update_program.py":
-                shutil.copy2(item, self.backup_dir / item.name)
-            elif item.is_dir() and item.name not in ["backup_temp", "__pycache__"]:
-                shutil.copytree(item, self.backup_dir / item.name)
+            # 제외할 폴더들
+            if item.name in ["backup_temp", "__pycache__", ".git"]:
+                continue
+            
+            try:
+                if item.is_file() and item.name != "update_program.py":
+                    shutil.copy2(item, self.backup_dir / item.name)
+                elif item.is_dir():
+                    shutil.copytree(item, self.backup_dir / item.name)
+            except Exception as e:
+                self.print_status(f"백업 중 오류 (무시): {item.name} - {e}")
         
         self.print_status("백업 완료")
     
@@ -239,14 +275,21 @@ class DoctorBillUpdater:
         
         try:
             for item in self.backup_dir.iterdir():
+                # .git 폴더는 건너뛰기
+                if item.name == ".git":
+                    continue
+                    
                 dest_path = self.current_dir / item.name
                 
-                if item.is_file():
-                    shutil.copy2(item, dest_path)
-                elif item.is_dir():
-                    if dest_path.exists():
-                        shutil.rmtree(dest_path)
-                    shutil.copytree(item, dest_path)
+                try:
+                    if item.is_file():
+                        shutil.copy2(item, dest_path)
+                    elif item.is_dir():
+                        if dest_path.exists():
+                            self.safe_remove_tree(dest_path)
+                        shutil.copytree(item, dest_path)
+                except Exception as e:
+                    self.print_status(f"복원 중 오류 (계속): {item.name} - {e}")
             
             self.print_status("복원 완료")
             return True
@@ -257,8 +300,7 @@ class DoctorBillUpdater:
     
     def cleanup(self):
         """임시 파일들 정리"""
-        if self.backup_dir.exists():
-            shutil.rmtree(self.backup_dir)
+        self.safe_remove_tree(self.backup_dir)
     
     def run_update(self):
         """업데이트 실행"""
