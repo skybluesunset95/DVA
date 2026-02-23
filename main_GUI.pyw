@@ -21,6 +21,101 @@ from modules.base_module import (
 from modules.survey_problem import open_survey_problem_manager
 
 
+class ToolTip:
+    """버튼 위에 마우스를 올리면 일정 시간 후 설명이 표시되는 툴팁 클래스"""
+    def __init__(self, widget, text, delay=1500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay  # 밀리초 (기본 1.5초)
+        self.tooltip_window = None
+        self.scheduled_id = None
+        
+        # 기존 이벤트 핸들러를 보존하면서 툴팁 이벤트 추가
+        self.widget.bind('<Enter>', self._on_enter, add='+')
+        self.widget.bind('<Leave>', self._on_leave, add='+')
+        self.widget.bind('<ButtonPress>', self._on_leave, add='+')
+    
+    def _on_enter(self, event=None):
+        """마우스가 위젯 위에 올라왔을 때 - 지연 후 툴팁 표시 예약"""
+        self._cancel_scheduled()
+        self.scheduled_id = self.widget.after(self.delay, self._show_tooltip)
+    
+    def _on_leave(self, event=None):
+        """마우스가 위젯에서 벗어났을 때 - 툴팁 숨기기"""
+        self._cancel_scheduled()
+        self._hide_tooltip()
+    
+    def _cancel_scheduled(self):
+        """예약된 툴팁 표시를 취소합니다."""
+        if self.scheduled_id:
+            self.widget.after_cancel(self.scheduled_id)
+            self.scheduled_id = None
+    
+    def _show_tooltip(self):
+        """툴팁 창을 표시합니다."""
+        if self.tooltip_window:
+            return
+        
+        # 위젯의 위치 계산
+        x = self.widget.winfo_rootx()
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        
+        # 툴팁 창 생성
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)  # 제목 표시줄 없앰
+        tw.wm_geometry(f"+{x}+{y}")
+        
+        # 툴팁 외부 프레임 (테두리 효과)
+        outer_frame = tk.Frame(
+            tw,
+            bg='#34495e',
+            padx=1,
+            pady=1
+        )
+        outer_frame.pack()
+        
+        # 툴팁 내부 프레임
+        inner_frame = tk.Frame(
+            outer_frame,
+            bg='#fefefa',
+            padx=10,
+            pady=6
+        )
+        inner_frame.pack()
+        
+        # 툴팁 텍스트
+        label = tk.Label(
+            inner_frame,
+            text=self.text,
+            font=("맑은 고딕", 10),
+            bg='#fefefa',
+            fg='#2c3e50',
+            justify='left',
+            wraplength=300
+        )
+        label.pack()
+        
+        # 화면 밖으로 나가지 않도록 위치 보정
+        tw.update_idletasks()
+        screen_width = self.widget.winfo_screenwidth()
+        screen_height = self.widget.winfo_screenheight()
+        tw_width = tw.winfo_width()
+        tw_height = tw.winfo_height()
+        
+        if x + tw_width > screen_width:
+            x = screen_width - tw_width - 10
+        if y + tw_height > screen_height:
+            y = self.widget.winfo_rooty() - tw_height - 5
+        
+        tw.wm_geometry(f"+{x}+{y}")
+    
+    def _hide_tooltip(self):
+        """툴팁 창을 숨깁니다."""
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+
+
 class DoctorBillAutomation:
     def __init__(self, root):
         self.root = root
@@ -515,22 +610,41 @@ class DoctorBillAutomation:
         
     
     def setup_hover_effects(self):
-        """버튼 호버 효과를 설정합니다."""
+        """버튼 호버 효과와 툴팁을 설정합니다."""
         # 호버 효과를 위한 색상 매핑
         hover_colors = {
             '✅ 출석체크': '#229954',
             '🧠 퀴즈풀기': '#c0392b',
             '📺 라이브세미나': '#8e44ad',
             '📋 설문참여': '#e67e22',
+            '🎯 설문문제': '#2471a3',
             '🚪 프로그램 종료': '#d35400'
         }
         
-        # 각 버튼에 호버 효과 적용
-        for button_text, hover_color in hover_colors.items():
-            for child in self.left_frame.winfo_children():
-                if isinstance(child, tk.Button) and child.cget('text') == button_text:
+        # 버튼별 툴팁 설명
+        button_tooltips = {
+            '✅ 출석체크': '닥터빌 사이트에 자동으로 출석체크합니다.\n매일 1회 가능하며, 포인트가 적립됩니다.',
+            '🧠 퀴즈풀기': '오늘의 퀴즈를 자동으로 검색하고 풀어줍니다.\n정답을 블로그에서 검색하여 자동 제출합니다.',
+            '📺 라이브세미나': '오늘 진행되는 라이브 세미나 목록을 수집합니다.\n더블클릭하면 해당 세미나를 신청/취소할 수 있습니다.',
+            '📋 설문참여': '진행 중인 설문조사에 자동으로 참여합니다.\n미리 등록된 답변을 사용하여 설문을 제출합니다.',
+            '🎯 설문문제': '설문 문제와 답변을 미리 등록하고 관리합니다.\n설문참여 기능에서 사용할 답변을 설정할 수 있습니다.',
+            '🚪 프로그램 종료': '브라우저와 프로그램을 안전하게 종료합니다.'
+        }
+        
+        # 각 버튼에 호버 효과 + 툴팁 적용
+        for child in self.left_frame.winfo_children():
+            if isinstance(child, tk.Button):
+                button_text = child.cget('text')
+                
+                # 호버 색상 효과
+                if button_text in hover_colors:
+                    hover_color = hover_colors[button_text]
                     child.bind('<Enter>', lambda e, btn=child, color=hover_color: btn.config(bg=color))
                     child.bind('<Leave>', lambda e, btn=child, text=button_text: self.restore_button_color(btn, text))
+                
+                # 툴팁 설명 추가
+                if button_text in button_tooltips:
+                    ToolTip(child, button_tooltips[button_text], delay=500)
     
     def restore_button_color(self, button, button_text):
         """버튼의 원래 색상을 복원합니다."""
@@ -539,6 +653,7 @@ class DoctorBillAutomation:
             '🧠 퀴즈풀기': '#e74c3c',
             '📺 라이브세미나': '#9b59b6',
             '📋 설문참여': '#f39c12',
+            '🎯 설문문제': '#3498db',
             '🚪 프로그램 종료': '#e67e22'
         }
         button.config(bg=original_colors.get(button_text, '#95a5a6'))

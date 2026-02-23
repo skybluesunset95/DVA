@@ -66,7 +66,7 @@ class WebAutomation:
             if "This version of ChromeDriver only supports Chrome version" in error_msg:
                 self.logger.warning("ChromeDriver 버전 불일치 감지 - 자동 업데이트 시작...")
                 need_update = True
-            elif "Unable to locate or obtain driver" in error_msg:
+            elif "Unable to obtain driver" in error_msg:
                 self.logger.warning("ChromeDriver 파일 없음 감지 - 자동 다운로드 시작...")
                 need_update = True
             
