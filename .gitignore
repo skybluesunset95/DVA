@@ -229,3 +229,7 @@ backup/
 temp/
 tmp/
 *.tmp
+
+# AI Agent 관련 파일들
+.agent/
+.gemini/

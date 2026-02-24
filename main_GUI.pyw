@@ -132,7 +132,8 @@ class DoctorBillAutomation:
             'auto_attendance': True,             # 자동 출석체크
             'auto_quiz': True,                   # 자동 문제풀기
             'auto_seminar_check': True,          # 자동 라이브세미나 현황 열기
-            'auto_survey': True                  # 자동 설문참여
+            'auto_survey': True,                 # 자동 설문참여
+            'auto_seminar_join': False            # 자동 세미나 신청
         }
         
         # 설정 로드
@@ -140,6 +141,10 @@ class DoctorBillAutomation:
         
         # TaskManager 초기화
         self.task_manager = TaskManager()
+        
+        # 세미나 자동 새로고침 타이머 ID
+        self._seminar_refresh_timer_id = None
+        self._seminar_refresh_paused = False
         
         # GUI 구성
         self.setup_gui()
@@ -336,6 +341,19 @@ class DoctorBillAutomation:
             **button_style
         )
         self.survey_problem_button.pack(fill='x', padx=10, pady=8)
+        
+        # 배달의민족 쿠폰 구매 버튼
+        self.baemin_button = tk.Button(
+            self.left_frame,
+            text="🛵 배달의민족",
+            bg='#27ae60',
+            fg='white',
+            activebackground='#1e8449',
+            activeforeground='white',
+            command=self.open_baemin_purchase,
+            **button_style
+        )
+        self.baemin_button.pack(fill='x', padx=10, pady=8)
         
         # 프로그램 종료 버튼
         self.exit_button = tk.Button(
@@ -549,15 +567,32 @@ class DoctorBillAutomation:
     
     def setup_today_seminar_section(self):
         """오늘의 세미나 섹션을 설정합니다."""
-        # 세미나 제목
+        # 세미나 제목 + 멈춤 버튼 프레임
+        seminar_header_frame = tk.Frame(self.right_bottom_frame, bg='#f0f0f0')
+        seminar_header_frame.pack(fill='x', pady=(0, 10))
+        
         self.seminar_title = tk.Label(
-            self.right_bottom_frame,
+            seminar_header_frame,
             text="📺 오늘의 세미나",
             font=("맑은 고딕", 14, "bold"),
             bg='#f0f0f0',
             fg='#2c3e50'
         )
-        self.seminar_title.pack(anchor='w', pady=(0, 10))
+        self.seminar_title.pack(side='left')
+        
+        # 새로고침 멈춤/재개 버튼
+        self.seminar_refresh_btn = tk.Button(
+            seminar_header_frame,
+            text="⏸ 멈춤",
+            font=("맑은 고딕", 9),
+            bg='#e74c3c',
+            fg='white',
+            relief='flat',
+            cursor='hand2',
+            width=7,
+            command=self._toggle_seminar_refresh
+        )
+        self.seminar_refresh_btn.pack(side='right', padx=(0, 10))
         
         # 세미나 정보 표시 영역
         self.seminar_info_frame = tk.Frame(self.right_bottom_frame, bg='#ffffff', relief='solid', borderwidth=1)
@@ -618,6 +653,7 @@ class DoctorBillAutomation:
             '📺 라이브세미나': '#8e44ad',
             '📋 설문참여': '#e67e22',
             '🎯 설문문제': '#2471a3',
+            '🛵 배달의민족': '#1e8449',
             '🚪 프로그램 종료': '#d35400'
         }
         
@@ -628,6 +664,7 @@ class DoctorBillAutomation:
             '📺 라이브세미나': '오늘 진행되는 라이브 세미나 목록을 수집합니다.\n더블클릭하면 해당 세미나를 신청/취소할 수 있습니다.',
             '📋 설문참여': '진행 중인 설문조사에 자동으로 참여합니다.\n미리 등록된 답변을 사용하여 설문을 제출합니다.',
             '🎯 설문문제': '설문 문제와 답변을 미리 등록하고 관리합니다.\n설문참여 기능에서 사용할 답변을 설정할 수 있습니다.',
+            '🛵 배달의민족': '포인트로 배달의민족 10,000원 쿠폰을 자동 구매합니다.\n쿠폰 1개당 9,700P가 필요합니다.',
             '🚪 프로그램 종료': '브라우저와 프로그램을 안전하게 종료합니다.'
         }
         
@@ -654,6 +691,7 @@ class DoctorBillAutomation:
             '📺 라이브세미나': '#9b59b6',
             '📋 설문참여': '#f39c12',
             '🎯 설문문제': '#3498db',
+            '🛵 배달의민족': '#27ae60',
             '🚪 프로그램 종료': '#e67e22'
         }
         button.config(bg=original_colors.get(button_text, '#95a5a6'))
@@ -986,6 +1024,20 @@ class DoctorBillAutomation:
         )
         survey_check.pack(anchor='w', pady=2)
         
+        # 자동 세미나 신청
+        self.setting_vars['auto_seminar_join'] = tk.BooleanVar(value=self.get_setting('auto_seminar_join'))
+        seminar_join_check = tk.Checkbutton(
+            auto_frame,
+            text="📝 자동 세미나 신청 (5초마다 신청가능 세미나 자동 신청)",
+            variable=self.setting_vars['auto_seminar_join'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        seminar_join_check.pack(anchor='w', pady=2)
+        
         
         # 설명 텍스트
         info_text = tk.Text(
@@ -1131,6 +1183,9 @@ class DoctorBillAutomation:
             self.log_message("모든 자동 작업이 완료되었습니다!")
             self.update_status("자동 작업 완료")
             
+            # 세미나 자동 새로고침 시작 (5초 간격)
+            self.root.after(0, self._start_seminar_auto_refresh)
+            
         except Exception as e:
             self.handle_error('data', f"자동 작업 실행 중 오류: {str(e)}")
     
@@ -1162,6 +1217,64 @@ class DoctorBillAutomation:
                 
         except Exception as e:
             self.handle_error('data', f"세미나 정보 수집 실패: {str(e)}")
+    
+    def _start_seminar_auto_refresh(self):
+        """세미나 자동 새로고침을 시작합니다. (5초 간격)"""
+        self.log_info("세미나 자동 새로고침이 시작되었습니다. (5초 간격)")
+        self._do_seminar_refresh()
+    
+    def _toggle_seminar_refresh(self):
+        """세미나 자동 새로고침 멈춤/재개 토글"""
+        self._seminar_refresh_paused = not self._seminar_refresh_paused
+        
+        if self._seminar_refresh_paused:
+            self.seminar_refresh_btn.config(text="▶ 재개", bg='#27ae60')
+            self.log_message("⏸ 세미나 자동 새로고침이 일시정지되었습니다.")
+        else:
+            self.seminar_refresh_btn.config(text="⏸ 멈춤", bg='#e74c3c')
+            self.log_message("▶ 세미나 자동 새로고침이 재개되었습니다.")
+    
+    def _do_seminar_refresh(self):
+        """5초마다 세미나 정보를 새로고침합니다."""
+        try:
+            # 일시정지 상태면 건너뛰기
+            if self._seminar_refresh_paused:
+                pass  # 조용히 건너뛰기
+            # 다른 모듈이 실행 중이면 건너뛰기 (Selenium 충돌 방지)
+            elif self.task_manager.state.current_module is not None:
+                pass  # 조용히 건너뛰기
+            elif self.task_manager.state.web_automation is None:
+                pass  # 웹드라이버 없으면 건너뛰기
+            else:
+                # 자동 세미나 신청이 켜져 있으면 신청 + 정보 수집을 한번에
+                if self.get_setting('auto_seminar_join'):
+                    def _auto_apply_and_refresh():
+                        try:
+                            from modules.seminar_module import SeminarModule
+                            if not self.task_manager.state.web_automation:
+                                return
+                            seminar_module = SeminarModule(self.task_manager.state.web_automation, self.log_message)
+                            applied = seminar_module.auto_apply_available_seminars()
+                            # 신청 후 최신 정보로 트리뷰 갱신
+                            self._collect_seminar_info_for_main_gui()
+                        except Exception as e:
+                            print(f"자동 세미나 신청 중 오류: {e}")
+                    
+                    threading.Thread(
+                        target=_auto_apply_and_refresh,
+                        daemon=True
+                    ).start()
+                else:
+                    # 정보 수집만
+                    threading.Thread(
+                        target=self._collect_seminar_info_for_main_gui,
+                        daemon=True
+                    ).start()
+        except Exception as e:
+            print(f"세미나 새로고침 중 오류: {e}")
+        finally:
+            # 5초 후 다시 실행 예약
+            self._seminar_refresh_timer_id = self.root.after(5000, self._do_seminar_refresh)
     
     def attendance_check(self):
         """출석체크 기능"""
@@ -1222,6 +1335,215 @@ class DoctorBillAutomation:
         except Exception as e:
             self.handle_error('gui', f"설문 문제 관리 창 오류: {str(e)}")
     
+    def open_baemin_purchase(self):
+        """배달의민족 쿠폰 구매 다이얼로그 열기"""
+        if self.task_manager.state.is_logging_in:
+            self.log_message("로그인 중입니다. 잠시 기다려주세요...")
+            return
+        
+        if not self.task_manager.state.web_automation:
+            self.log_message("❌ 먼저 로그인해주세요.")
+            return
+        
+        self.log_message("🛵 배달의민족 쿠폰 구매 준비 중...")
+        self.update_status("포인트 조회 중...")
+        
+        # 세미나 새로고침 일시정지 + 버튼 UI 업데이트
+        self._seminar_refresh_paused = True
+        self.seminar_refresh_btn.config(text="▶ 재개", bg='#27ae60')
+        
+        def _prepare_and_show_dialog():
+            try:
+                self.task_manager.state.current_module = 'baemin'
+                
+                from modules.baemin_module import BaeminModule, COUPON_PRICE, COUPON_VALUE
+                
+                baemin = BaeminModule(self.task_manager.state.web_automation, self.log_message)
+                gui_callbacks = self.get_callbacks()
+                baemin.set_callbacks(gui_callbacks)
+                
+                current_points = baemin.get_current_points()
+                max_coupons = baemin.calculate_max_coupons(current_points)
+                phone_number = baemin.get_phone_number() or ''
+                
+                self.log_message(f"현재 포인트: {current_points:,}P | 최대 구매 가능: {max_coupons}개")
+                
+                self.task_manager.state.current_module = None
+                
+                # GUI 스레드에서 다이얼로그 표시
+                self.root.after(0, lambda: self._show_baemin_dialog(current_points, max_coupons, phone_number))
+                
+            except Exception as e:
+                self.task_manager.state.current_module = None
+                self._seminar_refresh_paused = False
+                self.root.after(0, lambda: self.seminar_refresh_btn.config(text="⏸ 멈춤", bg='#e74c3c'))
+                self.log_message(f"❌ 포인트 조회 중 오류: {str(e)}")
+                self.update_status("대기 중")
+        
+        threading.Thread(target=_prepare_and_show_dialog, daemon=True).start()
+    
+    def _show_baemin_dialog(self, current_points, max_coupons, phone_number=''):
+        """배달의민족 쿠폰 구매 수량 입력 다이얼로그"""
+        from modules.baemin_module import COUPON_PRICE, COUPON_VALUE
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("🛵 배달의민족 쿠폰 구매")
+        dialog.geometry("400x380")
+        dialog.resizable(False, False)
+        dialog.configure(bg='#f8f9fa')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # 중앙 정렬
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 200
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 190
+        dialog.geometry(f"400x380+{x}+{y}")
+        
+        # 제목
+        tk.Label(
+            dialog, text="🛵 배달의민족 쿠폰 구매",
+            font=("맑은 고딕", 16, "bold"), bg='#f8f9fa', fg='#2c3e50'
+        ).pack(pady=(20, 15))
+        
+        # 정보 프레임
+        info_frame = tk.Frame(dialog, bg='#ffffff', relief='solid', borderwidth=1)
+        info_frame.pack(fill='x', padx=30, pady=(0, 15))
+        
+        tk.Label(
+            info_frame, text=f"현재 포인트:  {current_points:,}P",
+            font=("맑은 고딕", 12), bg='#ffffff', fg='#2c3e50', anchor='w'
+        ).pack(fill='x', padx=15, pady=(12, 4))
+        
+        tk.Label(
+            info_frame, text=f"쿠폰 가격:  {COUPON_PRICE:,}P (={COUPON_VALUE:,}원 쿠폰)",
+            font=("맑은 고딕", 11), bg='#ffffff', fg='#7f8c8d', anchor='w'
+        ).pack(fill='x', padx=15, pady=(0, 4))
+        
+        max_color = '#27ae60' if max_coupons > 0 else '#e74c3c'
+        tk.Label(
+            info_frame, text=f"최대 구매 가능:  {max_coupons}개",
+            font=("맑은 고딕", 12, "bold"), bg='#ffffff', fg=max_color, anchor='w'
+        ).pack(fill='x', padx=15, pady=(0, 12))
+        
+        # 받는 사람 번호
+        phone_frame = tk.Frame(dialog, bg='#f8f9fa')
+        phone_frame.pack(pady=(0, 10))
+        
+        tk.Label(
+            phone_frame, text="받는 사람:",
+            font=("맑은 고딕", 12), bg='#f8f9fa', fg='#2c3e50'
+        ).pack(side='left', padx=(0, 10))
+        
+        phone_var = tk.StringVar(value=phone_number)
+        phone_entry = tk.Entry(
+            phone_frame, textvariable=phone_var, width=15,
+            font=("맑은 고딕", 14, "bold"),
+            justify='center'
+        )
+        phone_entry.pack(side='left')
+        
+        # 구매 수량
+        qty_frame = tk.Frame(dialog, bg='#f8f9fa')
+        qty_frame.pack(pady=(0, 15))
+        
+        tk.Label(
+            qty_frame, text="구매 수량:",
+            font=("맑은 고딕", 12), bg='#f8f9fa', fg='#2c3e50'
+        ).pack(side='left', padx=(0, 10))
+        
+        qty_var = tk.IntVar(value=min(1, max_coupons))
+        
+        if max_coupons > 0:
+            qty_spinbox = tk.Spinbox(
+                qty_frame, from_=1, to=max_coupons,
+                textvariable=qty_var, width=5,
+                font=("맑은 고딕", 14, "bold"),
+                justify='center'
+            )
+            qty_spinbox.pack(side='left')
+            
+            tk.Label(
+                qty_frame, text=f"개  (1~{max_coupons})",
+                font=("맑은 고딕", 11), bg='#f8f9fa', fg='#7f8c8d'
+            ).pack(side='left', padx=(5, 0))
+        else:
+            tk.Label(
+                qty_frame, text="구매할 수 없습니다 (포인트 부족)",
+                font=("맑은 고딕", 11), bg='#f8f9fa', fg='#e74c3c'
+            ).pack(side='left')
+        
+        # 버튼 프레임
+        btn_frame = tk.Frame(dialog, bg='#f8f9fa')
+        btn_frame.pack(pady=(0, 20))
+        
+        def on_confirm():
+            quantity = qty_var.get()
+            entered_phone = phone_var.get().strip()
+            if not entered_phone:
+                self.log_message("❌ 받는 사람 번호를 입력해주세요.")
+                return
+            if quantity < 1 or quantity > max_coupons:
+                self.log_message(f"❌ 잘못된 수량입니다: {quantity}")
+                return
+            dialog.destroy()
+            total_cost = quantity * COUPON_PRICE
+            self.log_message(f"🛵 배달의민족 쿠폰 {quantity}개 구매 시작! (총 {total_cost:,}P)")
+            self.update_status(f"배달의민족 쿠폰 {quantity}개 구매 중...")
+            
+            def _run_purchase():
+                try:
+                    self.task_manager.state.current_module = 'baemin'
+                    self._seminar_refresh_paused = True
+                    
+                    from modules.baemin_module import BaeminModule
+                    baemin = BaeminModule(self.task_manager.state.web_automation, self.log_message)
+                    gui_callbacks = self.get_callbacks()
+                    baemin.set_callbacks(gui_callbacks)
+                    
+                    result = baemin.execute(quantity, entered_phone)
+                    
+                    if result:
+                        self.log_message("✅ 쿠폰 구매 진행 완료!")
+                    else:
+                        self.log_message("❌ 쿠폰 구매 진행 실패")
+                    
+                except Exception as e:
+                    self.log_message(f"❌ 구매 중 오류: {str(e)}")
+                finally:
+                    self.task_manager.state.current_module = None
+                    # 새로고침은 멈춤 상태 유지 (빌마켓 사이트에 있으므로)
+                    self.update_status("대기 중")
+            
+            threading.Thread(target=_run_purchase, daemon=True).start()
+        
+        def on_cancel():
+            dialog.destroy()
+            self.log_message("배달의민족 쿠폰 구매가 취소되었습니다.")
+            self.update_status("대기 중")
+            self._seminar_refresh_paused = False
+            self.seminar_refresh_btn.config(text="⏸ 멈춤", bg='#e74c3c')
+        
+        if max_coupons > 0:
+            confirm_btn = tk.Button(
+                btn_frame, text="✅ 구매하기", font=("맑은 고딕", 12, "bold"),
+                bg='#27ae60', fg='white', activebackground='#1e8449',
+                width=12, relief='flat', cursor='hand2',
+                command=on_confirm
+            )
+            confirm_btn.pack(side='left', padx=10)
+        
+        cancel_btn = tk.Button(
+            btn_frame, text="❌ 취소", font=("맑은 고딕", 12),
+            bg='#e74c3c', fg='white', activebackground='#c0392b',
+            width=12, relief='flat', cursor='hand2',
+            command=on_cancel
+        )
+        cancel_btn.pack(side='left', padx=10)
+        
+        # ESC로 닫기
+        dialog.bind('<Escape>', lambda e: on_cancel())
+    
     def check_seminar(self):
         """라이브세미나 확인 기능"""
         if self.task_manager.state.is_logging_in:
@@ -1280,6 +1602,11 @@ class DoctorBillAutomation:
     def on_closing(self):
         """프로그램 종료 시 정리 작업"""
         try:
+            # 세미나 자동 새로고침 타이머 취소
+            if self._seminar_refresh_timer_id is not None:
+                self.root.after_cancel(self._seminar_refresh_timer_id)
+                self._seminar_refresh_timer_id = None
+            
             # TaskManager를 통해 웹드라이버 정리
             self.task_manager.cleanup()
             self.log_message("프로그램을 종료합니다.")

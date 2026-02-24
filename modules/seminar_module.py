@@ -511,6 +511,61 @@ class SeminarModule(BaseModule):
             self._log('COLLECT_ERROR', error=str(e))
             return None
     
+    def auto_apply_available_seminars(self):
+        """신청가능한 세미나를 자동으로 신청합니다 (GUI 창 없음)"""
+        try:
+            # 세미나 정보 수집
+            seminars = self.collect_seminar_info_only()
+            
+            if not seminars:
+                return 0
+            
+            # 신청가능 세미나 필터링
+            available = []
+            for s in seminars:
+                status = s.get('status', '')
+                if '신청가능' in status:
+                    available.append(s)
+            
+            if not available:
+                return 0
+            
+            self._log(f"🔄 자동 신청 대상 세미나 {len(available)}개 발견")
+            
+            success_count = 0
+            for i, seminar in enumerate(available, 1):
+                try:
+                    title = seminar.get('title', '제목없음')
+                    self._log(f"[{i}/{len(available)}] {title} 자동 신청 중...")
+                    
+                    success = self._process_seminar_apply(seminar)
+                    
+                    if success:
+                        success_count += 1
+                        self._log(f"✅ {title} 자동 신청 완료")
+                    else:
+                        self._log(f"❌ {title} 자동 신청 실패")
+                    
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    self._log(f"❌ 세미나 자동 신청 중 오류: {str(e)}")
+            
+            if success_count > 0:
+                self._log(f"🎉 자동 신청 완료! {success_count}/{len(available)}개 성공")
+                # 세미나 목록 페이지로 복귀
+                try:
+                    self.web_automation.driver.get(SEMINAR_URL)
+                    self.web_automation.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, LOADING_SELECTOR)))
+                except:
+                    pass
+            
+            return success_count
+            
+        except Exception as e:
+            self._log(f"❌ 자동 신청 처리 중 오류: {str(e)}")
+            return 0
+    
     def execute(self):
         """라이브세미나 페이지로 이동하고 세미나 정보 수집 (GUI 창 포함)"""
         try:

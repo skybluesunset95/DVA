@@ -1,8 +1,8 @@
 {
-  "browser_headless": true,
   "auto_attendance": false,
   "auto_quiz": false,
   "auto_seminar_check": false,
   "auto_survey": false,
-  "auto_seminar_join": false
+  "auto_seminar_join": true,
+  "browser_headless": true
 }
