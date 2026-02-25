@@ -394,7 +394,10 @@ class SurveyModule(BaseModule):
                     self.log_info(f"=== {page_count}페이지 처리 중 ===")
                 
                 # 현재 페이지에서 문제 순서대로 하나씩 처리
-                self.auto_fill_questions_in_order()
+                if not self.auto_fill_questions_in_order():
+                    if self.gui_logger:
+                        self.log_info("❌ 퀴즈 정답 미등록으로 설문 자동 답변을 중단합니다.")
+                    return False
                 
                 # 🔥 모든 필수 항목이 제대로 채워졌는지 확인
                 if not self.validate_required_fields():
@@ -717,7 +720,7 @@ class SurveyModule(BaseModule):
                 if not text_input.get_attribute('value').strip():
                     try:
                         text_input.clear()
-                        text_input.send_keys(".")
+                        text_input.send_keys("없습니다.")
                         if self.gui_logger:
                             self.gui_logger(f"재시도: 텍스트 입력 필드 {i+1}번 답변 입력")
                     except:
@@ -742,7 +745,7 @@ class SurveyModule(BaseModule):
                 if not textarea.get_attribute('value').strip():
                     try:
                         textarea.clear()
-                        textarea.send_keys(".")
+                        textarea.send_keys("없습니다.")
                         if self.gui_logger:
                             self.gui_logger(f"재시도: textarea 필드 {i+1}번 답변 입력")
                     except:
@@ -849,6 +852,70 @@ class SurveyModule(BaseModule):
                                     self.gui_logger(f"✅ 퀴즈 정답 발견: {normalized_question[:40]}... → {quiz_answer}")
                                 else:
                                     self.gui_logger(f"⚠️ 퀴즈이지만 정답 미등록: {normalized_question[:45]}...")
+                                    
+                            if not quiz_answer:
+                                # 퀴즈지만 정답이 없는 경우, 보기 선택하지 않고 '설문문제' 창 띄우기
+                                if hasattr(self, 'gui_callbacks') and 'gui_instance' in self.gui_callbacks:
+                                    gui = self.gui_callbacks['gui_instance']
+                                    if hasattr(gui, 'root') and hasattr(gui, 'open_survey_problem'):
+                                        if self.gui_logger:
+                                            self.gui_logger(f"⚠️ 문제 {question_number}번: 정답 미등록. 설문 문제 자동 관리 창을 엽니다.")
+                                        
+                                        # 카테고리 추출 (페이지 타이틀에서)
+                                        category = ""
+                                        try:
+                                            title_text = self.web_automation.driver.title
+                                            import re
+                                            matches = re.findall(r'\(([^)]+)\)', title_text)
+                                            if matches:
+                                                last_paren = matches[-1]
+                                                category = last_paren.split('_')[0].strip()
+                                        except Exception:
+                                            pass
+                                            
+                                        # 문제 텍스트에서 첫 줄만 추출 (보기 제외)
+                                        display_question = ""
+                                        for line in question_text.split('\n'):
+                                            cleaned_line = line.strip()
+                                            if cleaned_line:
+                                                display_question = cleaned_line
+                                                break
+                                        
+                                        import re
+                                        # "1. " 같은 말머리 번호 제거
+                                        display_question = re.sub(r'^\d+\.\s*', '', display_question)
+                                        # [퀴즈] 태그 및 불필요한 별표(*) 제거
+                                        display_question = display_question.replace('[퀴즈]', '').replace('*', '').strip()
+                                            
+                                        # 람다 함수로 인수 전달 (tkinter after 메서드 사용 시)
+                                        gui.root.after(0, lambda q=display_question, c=category: gui.open_survey_problem(initial_question=q, initial_category=c))
+                                        
+                                        # 정답이 새로 등록될 때까지 대기
+                                        if self.gui_logger:
+                                            self.gui_logger(f"⌛ 문제 {question_number}번 정답이 등록될 때까지 대기합니다...")
+                                        
+                                        waiting_count = 0
+                                        import time
+                                        while True:
+                                            time.sleep(1.0)
+                                            waiting_count += 1
+                                            
+                                            # 다시 정답 확인
+                                            self.problem_manager.load_quizzes()
+                                            new_answer = self.problem_manager.get_answer(question_text)
+                                            if new_answer:
+                                                quiz_answer = new_answer
+                                                if self.gui_logger:
+                                                    self.gui_logger(f"✅ 새로운 정답 확인완료, 답변을 계속 진행합니다: {quiz_answer}")
+                                                break
+                                                
+                                            if waiting_count > 300: # 5분 타임아웃
+                                                if self.gui_logger:
+                                                    self.gui_logger("❌ 대기 시간(5분) 초과로 설문 자동 답변을 중단합니다.")
+                                                return False
+                                                
+                            if not quiz_answer:
+                                return False  # 전체 처리 중단 (gui를 열 수 없거나 팝업 이후 대기 타임아웃/오류 발생 시)
                         
                         if input_type == 'radio':
                             # 라디오 버튼: 퀴즈면 정답 선택, 아니면 첫 번째 옵션 선택
@@ -923,14 +990,15 @@ class SurveyModule(BaseModule):
                                     if self.gui_logger:
                                         self.log_info(f"문제 {question_number}번: 체크박스 첫 번째 옵션 선택")
                                     question_processed = True
-                                    
+                                
                         elif input_type == 'text':
-                            # 텍스트 입력: "." 입력
+                            # 텍스트 입력: 무조건 "없습니다." 입력
                             if not first_input.get_attribute('value').strip():
                                 first_input.clear()
-                                first_input.send_keys(".")
+                                text_to_enter = "없습니다."
+                                first_input.send_keys(text_to_enter)
                                 if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: 텍스트 입력 답변 완료")
+                                    self.log_info(f"문제 {question_number}번: 텍스트 '{text_to_enter}' 자동 입력 완료")
                                 question_processed = True
                                 
                         elif input_type == 'email':
@@ -943,14 +1011,16 @@ class SurveyModule(BaseModule):
                                     self.log_info(f"문제 {question_number}번: 이메일 입력 답변 완료")
                                 question_processed = True
                                 
-                        elif first_input.tag_name == 'textarea':
-                            # textarea: "." 입력
-                            if not first_input.get_attribute('value').strip():
-                                first_input.clear()
-                                first_input.send_keys(".")
+                        elif first_input.tag_name == 'textarea': # input_type for textarea is usually None or empty string, so check tag_name
+                            # 텍스트란 무조건 "없습니다." 입력
+                            if not first_input.get_attribute('value'):
+                                text_to_enter = "없습니다."
+                                first_input.send_keys(text_to_enter)
                                 if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: textarea 답변 완료")
-                                question_processed = True
+                                    self.log_info(f"문제 {question_number}번: 주관식 '{text_to_enter}' 자동 입력 완료")
+                            else:
+                                if self.gui_logger:
+                                    self.log_info(f"문제 {question_number}번: 주관식 이미 입력되어 있음")
                                 
                     except Exception as e:
                         if self.gui_logger:
@@ -1041,7 +1111,7 @@ class SurveyModule(BaseModule):
             for text_input in text_inputs:
                 try:
                     text_input.clear()
-                    text_input.send_keys(".")
+                    text_input.send_keys("없습니다.")
                     text_count += 1
                     if self.gui_logger:
                         self.gui_logger(f"주관식 {text_count}번 답변 입력 완료")
@@ -1069,7 +1139,7 @@ class SurveyModule(BaseModule):
             for textarea in textarea_inputs:
                 try:
                     textarea.clear()
-                    textarea.send_keys(".")
+                    textarea.send_keys("없습니다.")
                     textarea_count += 1
                     if self.gui_logger:
                         self.gui_logger(f"textarea {textarea_count}번 답변 입력 완료")

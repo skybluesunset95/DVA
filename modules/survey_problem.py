@@ -239,7 +239,7 @@ class SurveyProblemManager:
 
 
 # GUI를 위한 팝업 창
-def open_survey_problem_manager(parent_window, gui_logger=None):
+def open_survey_problem_manager(parent_window, gui_logger=None, initial_question=None, initial_category=None):
     """
     설문 문제 관리 팝업 창을 엽니다.
     
@@ -315,6 +315,12 @@ def open_survey_problem_manager(parent_window, gui_logger=None):
     )
     category_entry.pack(anchor='w', padx=10, pady=(0, 10))
     
+    # 초기값 설정
+    if initial_question:
+        question_entry.insert("1.0", initial_question)
+    if initial_category:
+        category_entry.insert(0, initial_category)
+    
     # 버튼 프레임
     button_frame = tk.Frame(input_frame, bg='#ffffff')
     button_frame.pack(fill='x', padx=10, pady=(0, 10))
@@ -353,10 +359,16 @@ def open_survey_problem_manager(parent_window, gui_logger=None):
         else:
             # 추가 모드
             if problem_manager.add_quiz(question, answer, category):
-                messagebox.showinfo("성공", "문제가 추가되었습니다.")
+                if not initial_question:
+                    messagebox.showinfo("성공", "문제가 추가되었습니다.")
                 if gui_logger:
                     category_str = f" [{category}]" if category else ""
                     gui_logger(f"✅ 퀴즈 추가: {question[:30]}...{category_str} → {answer}")
+                
+                # 자동으로 열린 창이면 추가 후 파기하고 리턴
+                if initial_question:
+                    popup.destroy()
+                    return
             else:
                 messagebox.showerror("오류", "문제 추가에 실패했습니다.")
                 return

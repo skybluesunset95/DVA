@@ -1316,6 +1316,13 @@ class DoctorBillAutomation:
             self.log_message("설문참여 페이지로 이동합니다...")
             self.update_status("설문참여 페이지 이동 중...")
             
+            # 멈춤 상태가 아니라면 멈춤으로 변경
+            if hasattr(self, '_seminar_refresh_paused') and not self._seminar_refresh_paused:
+                self._seminar_refresh_paused = True
+                if hasattr(self, 'seminar_refresh_btn'):
+                    self.seminar_refresh_btn.config(text="▶ 재개", bg='#27ae60')
+                self.log_message("⏸ 설문참여를 위해 세미나 자동 새로고침을 일시정지합니다.")
+            
             # 표준 GUI 콜백 생성
             gui_callbacks = self.get_callbacks()
             
@@ -1326,11 +1333,11 @@ class DoctorBillAutomation:
             self.handle_error('webpage', f"설문참여 페이지 이동 중 오류: {str(e)}")
             self.update_status("설문참여 페이지 오류")
     
-    def open_survey_problem(self):
+    def open_survey_problem(self, initial_question=None, initial_category=None):
         """설문 문제 관리 창 열기"""
         try:
             self.log_message("설문 문제 관리 창을 열고 있습니다...")
-            open_survey_problem_manager(self.root, self.log_message)
+            open_survey_problem_manager(self.root, self.log_message, initial_question, initial_category)
             self.log_message("✅ 설문 문제 관리 창이 열렸습니다.")
         except Exception as e:
             self.handle_error('gui', f"설문 문제 관리 창 오류: {str(e)}")
