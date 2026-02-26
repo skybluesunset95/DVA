@@ -4,5 +4,8 @@
   "auto_seminar_check": false,
   "auto_survey": false,
   "auto_seminar_join": true,
+  "auto_seminar_enter": false,
+  "seminar_enter_delay": 5,
+  "seminar_refresh_interval": 60,
   "browser_headless": true
 }

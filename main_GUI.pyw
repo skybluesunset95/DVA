@@ -133,7 +133,10 @@ class DoctorBillAutomation:
             'auto_quiz': True,                   # 자동 문제풀기
             'auto_seminar_check': True,          # 자동 라이브세미나 현황 열기
             'auto_survey': True,                 # 자동 설문참여
-            'auto_seminar_join': False            # 자동 세미나 신청
+            'auto_seminar_join': False,           # 자동 세미나 신청
+            'auto_seminar_enter': False,          # 자동 세미나 입장
+            'seminar_enter_delay': 5,             # 세미나 입장 대기시간 (분)
+            'seminar_refresh_interval': 5         # 세미나 새로고침 간격 (초)
         }
         
         # 설정 로드
@@ -145,6 +148,8 @@ class DoctorBillAutomation:
         # 세미나 자동 새로고침 타이머 ID
         self._seminar_refresh_timer_id = None
         self._seminar_refresh_paused = False
+        self._entered_seminars = set()  # 이미 자동 입장한 세미나 링크 추적
+        self._previous_seminar_links = set()  # 이전 새로고침 시점의 세미나 링크 (강의 종료 감지용)
         
         # GUI 구성
         self.setup_gui()
@@ -1028,7 +1033,7 @@ class DoctorBillAutomation:
         self.setting_vars['auto_seminar_join'] = tk.BooleanVar(value=self.get_setting('auto_seminar_join'))
         seminar_join_check = tk.Checkbutton(
             auto_frame,
-            text="📝 자동 세미나 신청 (5초마다 신청가능 세미나 자동 신청)",
+            text="📝 자동 세미나 신청",
             variable=self.setting_vars['auto_seminar_join'],
             font=("맑은 고딕", 11),
             bg='#f0f0f0',
@@ -1037,6 +1042,84 @@ class DoctorBillAutomation:
             activeforeground='#2c3e50'
         )
         seminar_join_check.pack(anchor='w', pady=2)
+        
+        # 자동 세미나 입장하기
+        self.setting_vars['auto_seminar_enter'] = tk.BooleanVar(value=self.get_setting('auto_seminar_enter'))
+        seminar_enter_check = tk.Checkbutton(
+            auto_frame,
+            text="🚪 자동 세미나 입장하기",
+            variable=self.setting_vars['auto_seminar_enter'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        seminar_enter_check.pack(anchor='w', pady=2)
+        
+        # 세미나 입장 대기시간 설정
+        enter_delay_frame = tk.Frame(auto_frame, bg='#f0f0f0')
+        enter_delay_frame.pack(anchor='w', pady=(5, 10), padx=25)
+        
+        tk.Label(
+            enter_delay_frame,
+            text="⏳ 입장 대기시간: 시작시간 +",
+            font=("맑은 고딕", 10),
+            bg='#f0f0f0',
+            fg='#2c3e50'
+        ).pack(side='left')
+        
+        self.setting_vars['seminar_enter_delay'] = tk.IntVar(value=self.get_setting('seminar_enter_delay'))
+        enter_delay_spinbox = tk.Spinbox(
+            enter_delay_frame,
+            from_=0,
+            to=30,
+            textvariable=self.setting_vars['seminar_enter_delay'],
+            width=4,
+            font=("맑은 고딕", 10, "bold"),
+            justify='center'
+        )
+        enter_delay_spinbox.pack(side='left', padx=5)
+        
+        tk.Label(
+            enter_delay_frame,
+            text="분 후 자동 입장",
+            font=("맑은 고딕", 10),
+            bg='#f0f0f0',
+            fg='#7f8c8d'
+        ).pack(side='left')
+        
+        # 세미나 새로고침 간격 설정
+        interval_frame = tk.Frame(auto_frame, bg='#f0f0f0')
+        interval_frame.pack(anchor='w', pady=10, padx=5)
+        
+        tk.Label(
+            interval_frame,
+            text="⏱ 세미나 새로고침 간격:",
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50'
+        ).pack(side='left')
+        
+        self.setting_vars['seminar_refresh_interval'] = tk.IntVar(value=self.get_setting('seminar_refresh_interval'))
+        interval_spinbox = tk.Spinbox(
+            interval_frame,
+            from_=1,
+            to=60,
+            textvariable=self.setting_vars['seminar_refresh_interval'],
+            width=5,
+            font=("맑은 고딕", 10, "bold"),
+            justify='center'
+        )
+        interval_spinbox.pack(side='left', padx=10)
+        
+        tk.Label(
+            interval_frame,
+            text="초 (권장: 5초 이상)",
+            font=("맑은 고딕", 10),
+            bg='#f0f0f0',
+            fg='#7f8c8d'
+        ).pack(side='left')
         
         
         # 설명 텍스트
@@ -1172,18 +1255,13 @@ class DoctorBillAutomation:
                 self.task_manager.execute_seminar(gui_callbacks)
                 time.sleep(2)  # 작업 간 대기
             
-            # 5. 자동 설문참여
-            if self.get_setting('auto_survey'):
-                self.log_message("자동 설문참여를 시작합니다...")
-                self.update_status("자동 설문참여 중...")
-                self.task_manager.execute_survey(gui_callbacks)
-                time.sleep(2)  # 작업 간 대기
+            # 5. 자동 설문참여는 강의 종료 감지 시 자동 실행됨 (새로고침 주기로 처리)
             
             
             self.log_message("모든 자동 작업이 완료되었습니다!")
             self.update_status("자동 작업 완료")
             
-            # 세미나 자동 새로고침 시작 (5초 간격)
+            # 세미나 자동 새로고침 시작
             self.root.after(0, self._start_seminar_auto_refresh)
             
         except Exception as e:
@@ -1219,8 +1297,9 @@ class DoctorBillAutomation:
             self.handle_error('data', f"세미나 정보 수집 실패: {str(e)}")
     
     def _start_seminar_auto_refresh(self):
-        """세미나 자동 새로고침을 시작합니다. (5초 간격)"""
-        self.log_info("세미나 자동 새로고침이 시작되었습니다. (5초 간격)")
+        """세미나 자동 새로고침을 시작합니다."""
+        interval = self.get_setting('seminar_refresh_interval')
+        self.log_info(f"세미나 자동 새로고침이 시작되었습니다. ({interval}초 간격)")
         self._do_seminar_refresh()
     
     def _toggle_seminar_refresh(self):
@@ -1235,7 +1314,7 @@ class DoctorBillAutomation:
             self.log_message("▶ 세미나 자동 새로고침이 재개되었습니다.")
     
     def _do_seminar_refresh(self):
-        """5초마다 세미나 정보를 새로고침합니다."""
+        """설정된 간격마다 세미나 정보를 새로고침합니다."""
         try:
             # 일시정지 상태면 건너뛰기
             if self._seminar_refresh_paused:
@@ -1257,6 +1336,11 @@ class DoctorBillAutomation:
                             applied = seminar_module.auto_apply_available_seminars()
                             # 신청 후 최신 정보로 트리뷰 갱신
                             self._collect_seminar_info_for_main_gui()
+                            # 강의 종료 감지 후 자동 설문참여
+                            self.root.after(0, self._check_and_run_auto_survey)
+                            # 자동 세미나 입장 체크
+                            if self.get_setting('auto_seminar_enter'):
+                                self.root.after(0, self._auto_enter_seminars)
                         except Exception as e:
                             print(f"자동 세미나 신청 중 오류: {e}")
                     
@@ -1265,16 +1349,169 @@ class DoctorBillAutomation:
                         daemon=True
                     ).start()
                 else:
-                    # 정보 수집만
+                    def _refresh_and_check_enter():
+                        try:
+                            self._collect_seminar_info_for_main_gui()
+                            # 강의 종료 감지 후 자동 설문참여
+                            self.root.after(0, self._check_and_run_auto_survey)
+                            # 자동 세미나 입장 체크
+                            if self.get_setting('auto_seminar_enter'):
+                                self.root.after(0, self._auto_enter_seminars)
+                        except Exception as e:
+                            print(f"세미나 새로고침 중 오류: {e}")
+                    
                     threading.Thread(
-                        target=self._collect_seminar_info_for_main_gui,
+                        target=_refresh_and_check_enter,
                         daemon=True
                     ).start()
         except Exception as e:
             print(f"세미나 새로고침 중 오류: {e}")
         finally:
-            # 5초 후 다시 실행 예약
-            self._seminar_refresh_timer_id = self.root.after(5000, self._do_seminar_refresh)
+            # 설정된 간격 후 다시 실행 예약
+            interval = self.get_setting('seminar_refresh_interval')
+            self._seminar_refresh_timer_id = self.root.after(interval * 1000, self._do_seminar_refresh)
+    
+    def _get_current_seminar_links(self):
+        """현재 트리뷰에 표시된 세미나의 detail_link 집합을 반환합니다."""
+        links = set()
+        try:
+            for item_id in self.seminar_tree.get_children():
+                tags = self.seminar_tree.item(item_id, "tags")
+                if 'date_separator' in tags:
+                    continue
+                if len(tags) > 0 and tags[0] and tags[0] not in ['신청가능', '신청완료', '신청마감', '입장하기', '대기중', '기타']:
+                    links.add(tags[0])
+        except Exception:
+            pass
+        return links
+    
+    def _check_and_run_auto_survey(self):
+        """강의 종료 감지 시 자동 설문참여를 실행합니다."""
+        try:
+            if not self.get_setting('auto_survey'):
+                # 설정이 꺼져 있으면 링크만 업데이트
+                self._previous_seminar_links = self._get_current_seminar_links()
+                return
+            
+            current_links = self._get_current_seminar_links()
+            
+            # 이전 목록이 있을 때만 비교 (첫 수집 시에는 비교 불가)
+            if self._previous_seminar_links:
+                disappeared = self._previous_seminar_links - current_links
+                if disappeared:
+                    self.log_message(f"📋 강의 {len(disappeared)}개 종료 감지! 자동 설문참여를 시작합니다...")
+                    
+                    def _run_auto_survey():
+                        try:
+                            self.task_manager.state.current_module = 'auto_survey'
+                            gui_callbacks = self.get_callbacks()
+                            self.task_manager.execute_survey(gui_callbacks)
+                            self.log_message("✅ 자동 설문참여 완료!")
+                        except Exception as e:
+                            self.log_message(f"❌ 자동 설문참여 중 오류: {str(e)}")
+                        finally:
+                            self.task_manager.state.current_module = None
+                    
+                    threading.Thread(target=_run_auto_survey, daemon=True).start()
+            
+            self._previous_seminar_links = current_links
+            
+        except Exception as e:
+            self.log_message(f"❌ 강의 종료 감지 중 오류: {str(e)}")
+    
+    def _auto_enter_seminars(self):
+        """입장 가능한 세미나를 시작시간 5분 후에 자동으로 입장합니다."""
+        try:
+            from datetime import datetime
+            now = datetime.now()
+            
+            for item_id in self.seminar_tree.get_children():
+                tags = self.seminar_tree.item(item_id, "tags")
+                values = self.seminar_tree.item(item_id, "values")
+                
+                # 날짜 구분선 건너뛰기
+                if 'date_separator' in tags:
+                    continue
+                
+                # '입장하기' 상태인지 확인
+                if '입장하기' not in tags:
+                    continue
+                
+                # detail_link 추출 (첫 번째 태그)
+                detail_link = tags[0] if len(tags) > 0 and tags[0] != '입장하기' else None
+                if not detail_link:
+                    continue
+                
+                # 이미 입장한 세미나는 건너뛰기
+                if detail_link in self._entered_seminars:
+                    continue
+                
+                # 시간 파싱 (예: "13:00~14:00" → 시작시간 13:00)
+                time_str = values[2] if len(values) > 2 else ''
+                if not time_str or '~' not in time_str:
+                    continue
+                
+                try:
+                    start_time_str = time_str.split('~')[0].strip()
+                    start_hour, start_minute = map(int, start_time_str.split(':'))
+                    
+                    # 오늘 날짜 + 시작시간으로 datetime 생성
+                    seminar_start = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+                    
+                    # 시작시간 + 설정된 대기시간 이후인지 확인
+                    from datetime import timedelta
+                    enter_delay = self.get_setting('seminar_enter_delay')
+                    entry_time = seminar_start + timedelta(minutes=enter_delay)
+                    
+                    if now >= entry_time:
+                        # 자동 입장 실행
+                        self._entered_seminars.add(detail_link)
+                        seminar_title = values[3] if len(values) > 3 else '알 수 없는 세미나'
+                        self.log_message(f"🚪 자동 입장 시작: {seminar_title} (시작시간: {start_time_str})")
+                        
+                        def _do_auto_enter(link=detail_link, title=seminar_title):
+                            try:
+                                self.task_manager.state.current_module = 'auto_enter'
+                                
+                                if not self.task_manager.state.web_automation or not self.task_manager.state.web_automation.driver:
+                                    self.log_message(f"❌ 웹드라이버 없음, 자동 입장 실패: {title}")
+                                    self._entered_seminars.discard(link)
+                                    return
+                                
+                                # 상대 경로 처리
+                                full_link = link
+                                if link.startswith('/'):
+                                    full_link = "https://www.doctorville.co.kr" + link
+                                
+                                self.task_manager.state.web_automation.driver.get(full_link)
+                                import time
+                                time.sleep(2)
+                                
+                                from modules.seminar_module import SeminarModule
+                                seminar_module = SeminarModule(self.task_manager.state.web_automation, self.log_message)
+                                success = seminar_module.enter_seminar()
+                                
+                                if success:
+                                    self.log_message(f"✅ 자동 입장 완료: {title}")
+                                else:
+                                    self.log_message(f"❌ 자동 입장 실패: {title}")
+                                    self._entered_seminars.discard(link)
+                                    
+                            except Exception as e:
+                                self.log_message(f"❌ 자동 입장 중 오류: {str(e)}")
+                                self._entered_seminars.discard(link)
+                            finally:
+                                self.task_manager.state.current_module = None
+                        
+                        threading.Thread(target=_do_auto_enter, daemon=True).start()
+                        # 한 번에 하나만 입장 (Selenium 충돌 방지)
+                        break
+                        
+                except (ValueError, IndexError) as e:
+                    continue
+                    
+        except Exception as e:
+            self.log_message(f"❌ 자동 세미나 입장 체크 중 오류: {str(e)}")
     
     def attendance_check(self):
         """출석체크 기능"""
