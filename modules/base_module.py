@@ -142,6 +142,24 @@ class BaseModule:
         """모듈 정리 메서드 - 필요시 오버라이드"""
         pass
     
+    def create_result(self, success, message="", data=None):
+        """
+        작업 결과를 일관된 구조로 생성합니다.
+        
+        Args:
+            success (bool): 성공 여부
+            message (str): 결과 요약 메시지
+            data (dict, optional): 추가 데이터 페이로드
+            
+        Returns:
+            dict: {"success": bool, "message": str, "data": dict}
+        """
+        return {
+            "success": success,
+            "message": message,
+            "data": data or {}
+        }
+    
     def check_points_after_activity(self):
         """활동 완료 후 포인트 확인 (공통 메서드)"""
         try:
@@ -150,17 +168,17 @@ class BaseModule:
             from modules.points_check_module import PointsCheckModule
             points_module = PointsCheckModule(self.web_automation, self.gui_logger)
             
-            # PointsCheckModule에 콜백 설정 (중요!)
+            # PointsCheckModule에 콜백 설정
             if hasattr(self, 'gui_callbacks'):
                 points_module.set_callbacks(self.gui_callbacks)
-                # gui_instance도 설정
-                if 'gui_instance' in self.gui_callbacks and self.gui_callbacks['gui_instance']:
-                    points_module.gui_instance = self.gui_callbacks['gui_instance']
             
             result = points_module.get_user_info_summary()
             
-            if result:
-                self.log_info(f"현재 포인트: {result.get('points', '0')}P")
+            # 결과 처리 (표준화된 dict 또는 기존 dict 대응)
+            data = result.get('data', result) if isinstance(result, dict) else {}
+            
+            if data:
+                self.log_info(f"현재 포인트: {data.get('points', '0')}P")
                 self.log_info("포인트 상태 확인 완료!")
             else:
                 self.log_info("포인트 상태 확인 실패")

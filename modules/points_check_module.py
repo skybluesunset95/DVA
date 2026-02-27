@@ -69,35 +69,42 @@ class PointsCheckModule(BaseModule):
         return datetime.now().strftime(DATE_FORMAT)
     
     def _update_gui_directly(self, result):
-        """GUI 업데이트 - 직접 접근 방식으로 단순화"""
+        """GUI 업데이트 - 콜백 인터페이스 사용"""
         try:
-            # gui_instance를 통해 직접 업데이트
-            if hasattr(self, 'gui_instance') and self.gui_instance:
-                gui = self.gui_instance
-                
-                # 사용자 이름 업데이트
-                if hasattr(gui, 'update_user_info'):
-                    gui.update_user_info(result['user_name'])
-                
-                # 포인트, 출석체크, 퀴즈 상태 업데이트
-                if hasattr(gui, 'update_display'):
-                    gui.update_display('points', result['points'])
-                    gui.update_display(STATUS_KEY_ATTENDANCE, result[STATUS_KEY_ATTENDANCE])
-                    gui.update_display(STATUS_KEY_QUIZ, result[STATUS_KEY_QUIZ])
-                
-                self.log_info("✅ GUI 업데이트 완료!")
+            # 설정된 콜백이 있는지 확인
+            if not hasattr(self, 'gui_callbacks') or not self.gui_callbacks:
+                self.log_warning("GUI 콜백이 설정되지 않아 업데이트를 건너뜁니다.")
                 return
+
+            callbacks = self.gui_callbacks
             
-            # gui_instance가 없는 경우
-            self.log_info("⚠ GUI 인스턴스가 설정되지 않았습니다")
+            # 사용자 이름 업데이트
+            if 'update_user_info' in callbacks:
+                callbacks['update_user_info'](result['user_name'])
+            
+            # 포인트, 출석체크, 퀴즈 상태 업데이트
+            if 'update_display' in callbacks:
+                update_display = callbacks['update_display']
+                update_display('points', result['points'])
+                update_display(STATUS_KEY_ATTENDANCE, result[STATUS_KEY_ATTENDANCE])
+                update_display(STATUS_KEY_QUIZ, result[STATUS_KEY_QUIZ])
+            
+            self.log_info("GUI 대시보드 업데이트 완료")
                 
         except Exception as e:
-            self.log_info(f"GUI 업데이트 실패: {str(e)}")
+            self.log_error(f"GUI 업데이트 중 오류: {str(e)}")
     
+    def execute(self):
+        """포인트 및 활동 상태 수집 실행"""
+        result = self.get_user_info_summary()
+        if result and result.get('success'):
+            return result
+        return self.create_result(False, "포인트 확인 실패")
+
     def get_user_info_summary(self):
         """사용자 정보 수집 - 메인 진입점"""
         try:
-            self.log_info("📊 사용자 정보 수집 시작...")
+            self.log_info("사용자 정보 수집 시작...")
             
             # 1단계: 메인 페이지에서 사용자 이름만 수집
             user_name = self._get_user_name_from_main()
@@ -106,28 +113,29 @@ class PointsCheckModule(BaseModule):
             points_data = self._get_points_and_activities()
             
             # 3단계: 결과 합치기
-            result = {
+            data = {
                 'user_name': user_name,
                 'points': points_data['points'],
                 'attendance_status': points_data[STATUS_KEY_ATTENDANCE],
                 'quiz_status': points_data[STATUS_KEY_QUIZ]
             }
             
-            self.log_info(f"📋 최종 결과: {result}")
+            self.log_success(f"활동 정보 수집 완료: {data['attendance_status']}, {data['quiz_status']}")
             
             # 4단계: GUI 업데이트
-            self._update_gui_directly(result)
+            self._update_gui_directly(data)
             
-            return result
+            return self.create_result(True, "사용자 정보 및 포인트 수집 완료", data)
             
         except Exception as e:
-            self.log_info(f"{ERROR_USER_INFO_FAILED}: {str(e)}")
-            return None
+            error_msg = f"{ERROR_USER_INFO_FAILED}: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
     
     def _get_user_name_from_main(self):
         """메인 페이지에서 사용자 이름만 수집"""
         try:
-            self.log_info("🏠 메인 페이지에서 사용자 이름 수집 중...")
+            self.log_info("메인 페이지에서 사용자 이름 수집 중...")
             
             # 메인 페이지로 이동
             self.web_automation.driver.get(MAIN_PAGE_URL)
@@ -146,17 +154,17 @@ class PointsCheckModule(BaseModule):
             elif user_name.endswith("님"):
                 user_name = user_name[:-1]
             
-            self.log_info(f"👤 사용자 이름: {user_name}")
+            self.log_info(f"사용자 이름: {user_name}")
             return user_name
             
         except Exception as e:
-            self.log_info(f"❌ 메인 페이지에서 사용자 이름 수집 실패: {e}")
+            self.log_error(f"메인 페이지에서 사용자 이름 수집 실패: {e}")
             return "사용자"
     
     def _get_points_and_activities(self):
         """포인트 페이지에서 포인트+활동상태 모두 수집"""
         try:
-            self.log_info("💰 포인트 페이지에서 정보 수집 중...")
+            self.log_info("포인트 페이지에서 정보 수집 중...")
             
             # 포인트 페이지로 이동
             self.web_automation.driver.get(POINTS_PAGE_URL)
@@ -166,10 +174,10 @@ class PointsCheckModule(BaseModule):
             try:
                 points_element = self.web_automation.driver.find_element(By.CSS_SELECTOR, POINTS_VALUE_SELECTOR)
                 current_points = points_element.text.strip()
-                self.log_info(f"💰 현재 포인트: {current_points}P")
+                self.log_info(f"현재 포인트: {current_points}P")
             except NoSuchElementException:
                 current_points = "0"
-                self.log_info("⚠️ 포인트 정보를 찾을 수 없음")
+                self.log_warning("포인트 정보를 찾을 수 없음")
             
             # 오늘 활동 상태 확인
             today = self._get_today_date()
@@ -183,7 +191,7 @@ class PointsCheckModule(BaseModule):
             }
             
         except Exception as e:
-            self.log_info(f"❌ 포인트 페이지 정보 수집 실패: {e}")
+            self.log_error(f"포인트 페이지 정보 수집 실패: {e}")
             return {
                 'points': "0",
                 STATUS_KEY_ATTENDANCE: STATUS_ATTENDANCE_INCOMPLETE,
@@ -201,15 +209,15 @@ class PointsCheckModule(BaseModule):
                     content_text = row.find_element(By.CSS_SELECTOR, CONTENT_CELL_SELECTOR).text.strip()
                     
                     if date_text == today and activity_type_key in content_text:
-                        self.log_info(f"🎉 {activity_type_key} 활동 발견!")
+                        self.log_success(f"{activity_type_key} 활동 발견!")
                         return True
                         
                 except NoSuchElementException:
                     continue
             
-            self.log_info(f"❌ {activity_type_key} 활동을 찾을 수 없습니다.")
+            self.log_info(f"{activity_type_key} 활동을 찾을 수 없습니다.")
             return False
             
         except Exception as e:
-            self.log_info(f"❌ {activity_type_key} 활동 확인 중 오류: {str(e)}")
+            self.log_error(f"{activity_type_key} 활동 확인 중 오류: {str(e)}")
             return False

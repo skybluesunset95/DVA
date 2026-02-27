@@ -45,157 +45,139 @@ class SurveyModule(BaseModule):
             # 중복 실행 방지
             with SurveyModule._lock:
                 if SurveyModule._is_running:
-                    if self.gui_logger:
-                        self.log_info("ℹ 이미 설문 참여가 진행 중입니다. 중복 방지를 위해 취소합니다.")
-                    return False
+                    self.log_info("ℹ 이미 설문 참여가 진행 중입니다. 중복 방지를 위해 취소합니다.")
+                    return self.create_result(False, "이미 설문 참여가 진행 중입니다.")
                 SurveyModule._is_running = True
 
             if not self.web_automation or not self.web_automation.driver:
-                if self.gui_logger:
-                    self.log_info("웹드라이버가 초기화되지 않았습니다. 먼저 로그인해주세요.")
+                self.log_error("웹드라이버가 초기화되지 않았습니다. 먼저 로그인해주세요.")
                 SurveyModule._is_running = False
-                return False
+                return self.create_result(False, "웹드라이버가 초기화되지 않았습니다.")
             
             original_window = self.web_automation.driver.current_window_handle
             
-            if self.gui_logger:
-                self.log_info("설문참여 페이지로 이동합니다...")
+            self.log_info("설문참여 페이지로 이동합니다...")
             
             # VOD 목록 페이지로 이동
             self.web_automation.driver.get(VOD_LIST_PAGE_URL)
-            
-            if self.gui_logger:
-                self.log_info("설문참여 페이지로 이동 완료")
+            self.log_info("설문참여 페이지로 이동 완료")
             
             # 🔥 첫 번째 세미나 자동 클릭
-            if self.gui_logger:
-                self.log_info("첫 번째 세미나를 자동으로 선택합니다...")
+            self.log_info("첫 번째 세미나를 자동으로 선택합니다...")
             
-            def auto_click_seminar():
-                try:
-                    # 페이지 로딩 완료 대기 (세미나 목록이 나타날 때까지)
-                    self.web_automation.wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, LIVE_LIST_CONTAINER_SELECTOR))
-                    )
+            return self._auto_click_seminar(original_window)
+            
+        except Exception as e:
+            SurveyModule._is_running = False
+            error_msg = f"{ERROR_SURVEY_PAGE_NAVIGATION}: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
+
+    def _auto_click_seminar(self, original_window):
+        """내부에서 동기적으로 세미나 클릭 및 설문 로직을 수행합니다."""
+        try:
+            # 페이지 로딩 완료 대기 (세미나 목록이 나타날 때까지)
+            self.web_automation.wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, LIVE_LIST_CONTAINER_SELECTOR))
+            )
+            
+            # 세미나 목록 가져오기
+            seminar_list = self.web_automation.driver.find_elements(
+                By.CSS_SELECTOR, 
+                ".live_list .list_cont a.list_detail"
+            )
+            
+            if not seminar_list:
+                self.log_error("세미나 목록을 찾을 수 없습니다")
+                return self.create_result(False, "세미나 목록을 찾을 수 없습니다.")
+            
+            # 첫 번째 세미나 시도
+            self.log_info("첫 번째 세미나를 시도합니다...")
+            
+            first_seminar = seminar_list[0]
+            seminar_title = first_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
+            
+            self.log_info(f"첫 번째 세미나 발견: {seminar_title}")
+            
+            # 링크 클릭
+            first_seminar.click()
+            
+            self.log_info("✅ 첫 번째 세미나 자동 선택 완료")
+            self.log_info("재입장하기 버튼을 찾는 중...")
+            
+            # 🔥 재입장하기 버튼 자동 클릭
+            if not self.auto_click_reenter_button():
+                # 첫 번째 세미나에 재입장 버튼이 없으면 두 번째 세미나 시도
+                if len(seminar_list) >= 2:
+                    self.log_info("첫 번째 세미나에 재입장 버튼이 없습니다. 두 번째 세미나를 시도합니다...")
                     
-                    # 세미나 목록 가져오기
+                    # 뒤로가기
+                    self.web_automation.driver.back()
+                    time.sleep(2)  # 페이지 로딩 대기
+                    
+                    # 페이지 이동 후 세미나 목록을 다시 찾기 (Stale Element Reference 방지)
                     seminar_list = self.web_automation.driver.find_elements(
                         By.CSS_SELECTOR, 
                         ".live_list .list_cont a.list_detail"
                     )
                     
-                    if not seminar_list:
-                        if self.gui_logger:
-                            self.gui_logger("❌ 세미나 목록을 찾을 수 없습니다")
-                        return
-                    
-                    # 첫 번째 세미나 시도
-                    if self.gui_logger:
-                        self.log_info("첫 번째 세미나를 시도합니다...")
-                    
-                    first_seminar = seminar_list[0]
-                    seminar_title = first_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
-                    
-                    if self.gui_logger:
-                        self.gui_logger(f"첫 번째 세미나 발견: {seminar_title}")
-                    
-                    # 링크 클릭
-                    first_seminar.click()
-                    
-                    if self.gui_logger:
-                        self.log_info("✅ 첫 번째 세미나 자동 선택 완료")
+                    if len(seminar_list) >= 2:
+                        # 두 번째 세미나 클릭
+                        second_seminar = seminar_list[1]
+                        seminar_title = second_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
+                        
+                        self.log_info(f"두 번째 세미나 발견: {seminar_title}")
+                        
+                        second_seminar.click()
+                        
+                        self.log_info("✅ 두 번째 세미나 자동 선택 완료")
                         self.log_info("재입장하기 버튼을 찾는 중...")
-                    
-                    # 🔥 재입장하기 버튼 자동 클릭
-                    if not self.auto_click_reenter_button():
-                        # 첫 번째 세미나에 재입장 버튼이 없으면 두 번째 세미나 시도
-                        if len(seminar_list) >= 2:
-                            if self.gui_logger:
-                                self.log_info("첫 번째 세미나에 재입장 버튼이 없습니다. 두 번째 세미나를 시도합니다...")
-                            
-                            # 뒤로가기
-                            self.web_automation.driver.back()
-                            time.sleep(2)  # 페이지 로딩 대기
-                            
-                            # 페이지 이동 후 세미나 목록을 다시 찾기 (Stale Element Reference 방지)
-                            seminar_list = self.web_automation.driver.find_elements(
-                                By.CSS_SELECTOR, 
-                                ".live_list .list_cont a.list_detail"
-                            )
-                            
-                            if len(seminar_list) >= 2:
-                                # 두 번째 세미나 클릭
-                                second_seminar = seminar_list[1]
-                                seminar_title = second_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
-                                
-                                if self.gui_logger:
-                                    self.gui_logger(f"두 번째 세미나 발견: {seminar_title}")
-                                
-                                second_seminar.click()
-                                
-                                if self.gui_logger:
-                                    self.log_info("✅ 두 번째 세미나 자동 선택 완료")
-                                    self.log_info("재입장하기 버튼을 찾는 중...")
-                                
-                                # 두 번째 세미나에서도 재입장 버튼 확인
-                                if not self.auto_click_reenter_button():
-                                    if self.gui_logger:
-                                        self.gui_logger("두 번째 세미나에도 재입장 버튼이 없습니다.")
-                            else:
-                                if self.gui_logger:
-                                    self.gui_logger("두 번째 세미나가 없습니다.")
-                        else:
-                            if self.gui_logger:
-                                self.gui_logger("두 번째 세미나가 없습니다.")
-                    
-                except Exception as e:
-                    if self.gui_logger:
-                        self.gui_logger(f"❌ {ERROR_FIRST_SEMINAR_SELECTION}: {str(e)}")
-                finally:
-                    if original_window and self.web_automation and self.web_automation.driver:
-                        try:
-                            if self.gui_logger:
-                                self.log_info("설문참여 완료 후 추가 창을 정리합니다...")
-                            self.web_automation.close_other_windows(original_window)
-                        except Exception as e:
-                            if self.gui_logger:
-                                self.log_info(f"창 정리 중 오류: {str(e)}")
-                        finally:
-                            # 추가 창 정리 후 가장 마지막에, 기본 창에서 단위 작업 종료 시 포인트 확인 실행
-                            if self.gui_logger:
-                                self.log_info("모든 창 정리 완료, 포인트 확인을 진행합니다...")
-                            self._run_points_check_module()
-                            
-                            # 🔥 임시 스크린샷 파일 삭제
-                            try:
-                                temp_img = os.path.join(os.getcwd(), "survey_quiz_temp.png")
-                                if os.path.exists(temp_img):
-                                    # 약간 대기 후 삭제 (이미지 뷰어가 파일을 물고 있을 수 있음)
-                                    time.sleep(2)
-                                    os.remove(temp_img)
-                                    if self.gui_logger:
-                                        self.log_info("🧹 임시 스크린샷 파일을 삭제했습니다.")
-                            except:
-                                pass
-                            finally:
-                                # 실행 종료 표시
-                                SurveyModule._is_running = False
+                        
+                        # 두 번째 세미나에서도 재입장 버튼 확인
+                        if not self.auto_click_reenter_button():
+                            self.log_warning("두 번째 세미나에도 재입장 버튼이 없습니다.")
+                    else:
+                        self.log_warning("두 번째 세미나가 없습니다.")
+                else:
+                    self.log_warning("두 번째 세미나가 없습니다.")
             
-            # 백그라운드에서 실행
-            threading.Thread(target=auto_click_seminar, daemon=True).start()
-            
-            return True
-            
+            return self.create_result(True, "설문 참여 처리가 완료되었습니다.")
+
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"{ERROR_SURVEY_PAGE_NAVIGATION}: {str(e)}")
-            return False
+            error_msg = f"{ERROR_FIRST_SEMINAR_SELECTION}: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
+            
+        finally:
+            if original_window and self.web_automation and self.web_automation.driver:
+                try:
+                    self.log_info("설문참여 완료 후 추가 창을 정리합니다...")
+                    self.web_automation.close_other_windows(original_window)
+                except Exception as e:
+                    self.log_warning(f"창 정리 중 오류: {str(e)}")
+                finally:
+                    # 추가 창 정리 후 가장 마지막에, 기본 창에서 단위 작업 종료 시 포인트 확인 실행
+                    self.log_info("모든 창 정리 완료, 포인트 확인을 진행합니다...")
+                    self._run_points_check_module()
+                    
+                    # 🔥 임시 스크린샷 파일 삭제
+                    try:
+                        temp_img = os.path.join(os.getcwd(), "survey_quiz_temp.png")
+                        if os.path.exists(temp_img):
+                            # 약간 대기 후 삭제 (이미지 뷰어가 파일을 물고 있을 수 있음)
+                            time.sleep(2)
+                            os.remove(temp_img)
+                            self.log_info("🧹 임시 스크린샷 파일을 삭제했습니다.")
+                    except:
+                        pass
+                    finally:
+                        # 실행 종료 표시
+                        SurveyModule._is_running = False
     
     def auto_click_reenter_button(self):
         """재입장하기 버튼을 자동으로 클릭합니다."""
         try:
-            if self.gui_logger:
-                self.log_info("재입장하기 버튼 검색 중...")
+            self.log_info("재입장하기 버튼 검색 중...")
             
             # 재입장하기 버튼이 있는지 먼저 확인 (타임아웃 2초로 단축)
             try:
@@ -210,15 +192,13 @@ class SurveyModule(BaseModule):
                     REENTER_BUTTON_SELECTOR
                 )
                 
-                if self.gui_logger:
-                    self.log_info("재입장하기 버튼 발견")
+                self.log_info("재입장하기 버튼 발견")
                 
                 # 버튼 클릭
                 reenter_button.click()
                 
-                if self.gui_logger:
-                    self.log_info("✅ 재입장하기 버튼 자동 클릭 완료")
-                    self.log_info("새로운 팝업 창에서 설문참여 버튼을 찾는 중...")
+                self.log_info("✅ 재입장하기 버튼 자동 클릭 완료")
+                self.log_info("새로운 팝업 창에서 설문참여 버튼을 찾는 중...")
                 
                 # 🔥 새로운 팝업 창에서 설문참여 버튼 자동 클릭
                 self.auto_click_survey_in_popup()
@@ -227,20 +207,17 @@ class SurveyModule(BaseModule):
                 
             except TimeoutException:
                 # 재입장하기 버튼이 없는 경우 (이미 설문 완료)
-                if self.gui_logger:
-                    self.log_info("⚠ 재입장하기 버튼이 없습니다. 이미 설문이 완료되었거나 참여할 설문이 없습니다.")
+                self.log_warning("재입장하기 버튼이 없습니다. 이미 설문이 완료되었거나 참여할 설문이 없습니다.")
                 return False
                 
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ {ERROR_REENTER_BUTTON_CLICK}: {str(e)}")
+            self.log_error(f"{ERROR_REENTER_BUTTON_CLICK}: {str(e)}")
             return False
     
     def auto_click_survey_in_popup(self):
         """새로운 팝업 창에서 설문참여 버튼을 자동으로 클릭합니다."""
         try:
-            if self.gui_logger:
-                self.log_info("새로운 팝업 창 대기 중...")
+            self.log_info("새로운 팝업 창 대기 중...")
             
             # 새로운 팝업 창이 열릴 때까지 대기
             time.sleep(2)  # 팝업 창 로딩 대기
@@ -257,16 +234,14 @@ class SurveyModule(BaseModule):
                     break
             
             if not popup_window:
-                if self.gui_logger:
-                    self.log_info("❌ 새로운 팝업 창을 찾을 수 없습니다")
+                self.log_error("새로운 팝업 창을 찾을 수 없습니다")
                 return False
             
             # 팝업 창으로 전환
             self.web_automation.driver.switch_to.window(popup_window)
             
-            if self.gui_logger:
-                self.log_info("팝업 창으로 전환 완료")
-                self.log_info("설문참여 버튼 검색 중...")
+            self.log_info("팝업 창으로 전환 완료")
+            self.log_info("설문참여 버튼 검색 중...")
             
             # 페이지 로딩 대기 (설문참여 버튼이 나타날 때까지)
             self.web_automation.wait.until(
@@ -279,15 +254,13 @@ class SurveyModule(BaseModule):
                 "#surveyEnter"
             )
             
-            if self.gui_logger:
-                self.log_info("설문참여 버튼 발견")
+            self.log_info("설문참여 버튼 발견")
             
             # 버튼 클릭
             survey_button.click()
             
-            if self.gui_logger:
-                self.log_info("✅ 설문참여 버튼 자동 클릭 완료")
-                self.log_info("개인정보 동의 팝업에서 설문하기 버튼을 찾는 중...")
+            self.log_info("✅ 설문참여 버튼 자동 클릭 완료")
+            self.log_info("개인정보 동의 팝업에서 설문하기 버튼을 찾는 중...")
             
             # 🔥 개인정보 동의 팝업에서 설문하기 버튼 자동 클릭
             self.auto_click_survey_button_in_agree_popup()
@@ -298,8 +271,7 @@ class SurveyModule(BaseModule):
             return True
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 팝업 창에서 설문참여 버튼 클릭 실패: {str(e)}")
+            self.log_error(f"팝업 창에서 설문참여 버튼 클릭 실패: {str(e)}")
             
             # 오류 발생 시 원래 창으로 돌아가기
             try:
@@ -312,17 +284,15 @@ class SurveyModule(BaseModule):
     def auto_click_survey_button_in_agree_popup(self):
         """개인정보 동의 팝업에서 설문하기 버튼을 자동으로 클릭합니다."""
         try:
-            if self.gui_logger:
-                self.log_info("개인정보 동의 팝업 대기 중...")
+            self.log_info("개인정보 동의 팝업 대기 중...")
             
             # 개인정보 동의 팝업이 나타날 때까지 대기
             self.web_automation.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "#agreeInfo"))
             )
             
-            if self.gui_logger:
-                self.log_info("개인정보 동의 팝업 발견")
-                self.log_info("동의 체크박스 자동 체크 중...")
+            self.log_info("개인정보 동의 팝업 발견")
+            self.log_info("동의 체크박스 자동 체크 중...")
             
             # 동의 체크박스 자동 체크
             try:
@@ -334,19 +304,15 @@ class SurveyModule(BaseModule):
                 # 체크박스가 체크되지 않은 경우에만 체크
                 if not agree_checkbox.is_selected():
                     agree_checkbox.click()
-                    if self.gui_logger:
-                        self.log_info("✅ 동의 체크박스 자동 체크 완료")
+                    self.log_info("✅ 동의 체크박스 자동 체크 완료")
                 else:
-                    if self.gui_logger:
-                        self.log_info("동의 체크박스가 이미 체크되어 있습니다")
+                    self.log_info("동의 체크박스가 이미 체크되어 있습니다")
                         
             except Exception as e:
-                if self.gui_logger:
-                    self.gui_logger(f"⚠ 동의 체크박스 처리 중 오류: {str(e)}")
+                self.log_warning(f"동의 체크박스 처리 중 오류: {str(e)}")
             
             # 설문하기 버튼 찾기 및 클릭
-            if self.gui_logger:
-                self.log_info("설문하기 버튼 검색 중...")
+            self.log_info("설문하기 버튼 검색 중...")
             
             # 페이지 로딩 대기 (설문하기 버튼이 나타날 때까지)
             self.web_automation.wait.until(
@@ -359,16 +325,14 @@ class SurveyModule(BaseModule):
                 "#agreeInfo .btn_answer"
             )
             
-            if self.gui_logger:
-                self.log_info("설문하기 버튼 발견")
+            self.log_info("설문하기 버튼 발견")
             
             # 버튼 클릭
             survey_button.click()
             
-            if self.gui_logger:
-                self.log_info("✅ 설문하기 버튼 자동 클릭 완료")
-                self.log_info("설문 페이지로 이동 중...")
-                self.log_info("새로운 설문 창에서 자동 답변을 시작합니다...")
+            self.log_info("✅ 설문하기 버튼 자동 클릭 완료")
+            self.log_info("설문 페이지로 이동 중...")
+            self.log_info("새로운 설문 창에서 자동 답변을 시작합니다...")
             
             # 🔥 새로운 설문 창에서 자동 답변 및 제출
             self.auto_fill_and_submit_survey()
@@ -376,15 +340,13 @@ class SurveyModule(BaseModule):
             return True
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 개인정보 동의 팝업에서 설문하기 버튼 클릭 실패: {str(e)}")
+            self.log_error(f"개인정보 동의 팝업에서 설문하기 버튼 클릭 실패: {str(e)}")
             return False
     
     def auto_fill_and_submit_survey(self):
         """새로운 설문 창에서 모든 질문의 첫 번째 보기를 자동 선택하고 제출합니다."""
         try:
-            if self.gui_logger:
-                self.log_info("새로운 설문 창 대기 중...")
+            self.log_info("새로운 설문 창 대기 중...")
             
             # 새로운 설문 창이 열릴 때까지 대기
             time.sleep(3)  # 설문 창 로딩 대기 (1초 → 3초로 증가)
@@ -407,22 +369,19 @@ class SurveyModule(BaseModule):
                         continue
             
             if not survey_window:
-                if self.gui_logger:
-                    self.log_info("❌ 새로운 설문 창을 찾을 수 없습니다")
+                self.log_error("❌ 새로운 설문 창을 찾을 수 없습니다")
                 return False
             
-            if self.gui_logger:
-                self.log_info("설문 창으로 전환 완료")
-                self.log_info("설문 페이지 로딩 대기 중...")
+            self.log_info("설문 창으로 전환 완료")
+            self.log_info("설문 페이지 로딩 대기 중...")
             
             # 설문 페이지 로딩 완료 대기
             self.web_automation.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "form[id^='surveyForm']"))
             )
             
-            if self.gui_logger:
-                self.log_info("설문 페이지 로딩 완료")
-                self.log_info("여러 페이지 설문 처리 시작...")
+            self.log_info("설문 페이지 로딩 완료")
+            self.log_info("여러 페이지 설문 처리 시작...")
             
             # 🔥 팝업 확인 및 처리
             self.handle_survey_popup()
@@ -431,31 +390,25 @@ class SurveyModule(BaseModule):
             page_count = 1
             
             while True:
-                if self.gui_logger:
-                    self.log_info(f"=== {page_count}페이지 처리 중 ===")
+                self.log_info(f"=== {page_count}페이지 처리 중 ===")
                 
                 # 현재 페이지에서 문제 순서대로 하나씩 처리
                 if not self.auto_fill_questions_in_order():
-                    if self.gui_logger:
-                        self.log_info("❌ 퀴즈 정답 미등록으로 설문 자동 답변을 중단합니다.")
+                    self.log_error("퀴즈 정답 미등록으로 설문 자동 답변을 중단합니다.")
                     return False
                 
                 # 🔥 모든 필수 항목이 제대로 채워졌는지 확인
                 if not self.validate_required_fields():
-                    if self.gui_logger:
-                        self.gui_logger("❌ 필수 항목이 모두 채워지지 않았습니다. 재시도합니다...")
+                    self.log_warning("필수 항목이 모두 채워지지 않았습니다. 재시도합니다...")
                     
                     # 재시도: 안 채워진 부분만 다시 채우기
                     if not self.retry_fill_missing_fields():
-                        if self.gui_logger:
-                            self.gui_logger("❌ 재시도 후에도 필수 항목이 채워지지 않았습니다. 설문 제출을 중단합니다.")
+                        self.log_error("재시도 후에도 필수 항목이 채워지지 않았습니다. 설문 제출을 중단합니다.")
                         return False
                     else:
-                        if self.gui_logger:
-                            self.gui_logger("✅ 재시도 후 모든 필수 항목이 채워졌습니다.")
+                        self.log_success("재시도 후 모든 필수 항목이 채워졌습니다.")
                 
-                if self.gui_logger:
-                    self.log_info(f"{page_count}페이지 답변 완료")
+                self.log_info(f"{page_count}페이지 답변 완료")
                 
                 # 페이지 하단 버튼 확인
                 try:
@@ -467,13 +420,11 @@ class SurveyModule(BaseModule):
                     # 버튼 텍스트 확인
                     button_text = footer_button.get_attribute('value') or footer_button.text
                     
-                    if self.gui_logger:
-                        self.log_info(f"페이지 하단 버튼 발견: {button_text}")
+                    self.log_info(f"페이지 하단 버튼 발견: {button_text}")
                     
                     if "다음" in button_text:
                         # 다음 버튼 클릭
-                        if self.gui_logger:
-                            self.log_info("다음 버튼 클릭, 다음 페이지로 이동...")
+                        self.log_info("다음 버튼 클릭, 다음 페이지로 이동...")
                         
                         footer_button.click()
                         
@@ -486,40 +437,33 @@ class SurveyModule(BaseModule):
                                 EC.presence_of_element_located((By.CSS_SELECTOR, "form[id^='surveyForm']"))
                             )
                         except TimeoutException:
-                            if self.gui_logger:
-                                self.log_info("⚠ 다음 페이지 로딩 대기 시간 초과, 계속 진행...")
+                            self.log_warning("다음 페이지 로딩 대기 시간 초과, 계속 진행...")
                         
                         page_count += 1
                         
                     elif "제출하기" in button_text:
                         # 제출 버튼 클릭
-                        if self.gui_logger:
-                            self.log_info("제출하기 버튼 발견, 설문 제출 중...")
+                        self.log_info("제출하기 버튼 발견, 설문 제출 중...")
                         
                         footer_button.click()
                         
-                        if self.gui_logger:
-                            self.log_info("✅ 설문 제출 완료!")
+                        self.log_success("설문 제출 완료!")
                         
                         break  # 반복문 종료
                         
                     else:
                         # 예상하지 못한 버튼
-                        if self.gui_logger:
-                            self.log_info(f"⚠ 예상하지 못한 버튼: {button_text}")
+                        self.log_warning(f"예상하지 못한 버튼: {button_text}")
                         break
                         
                 except NoSuchElementException:
-                    if self.gui_logger:
-                        self.log_info("❌ 페이지 하단 버튼을 찾을 수 없습니다")
+                    self.log_info("페이지 하단 버튼을 찾을 수 없습니다")
                     break
                 except Exception as e:
-                    if self.gui_logger:
-                        self.log_info(f"⚠ 버튼 처리 중 오류: {str(e)}")
+                    self.log_warning(f"버튼 처리 중 오류: {str(e)}")
                     break
             
-            if self.gui_logger:
-                self.log_info(f"총 {page_count}페이지 처리 완료")
+            self.log_info(f"총 {page_count}페이지 처리 완료")
             
             # 확인 팝업 처리
             self._handle_submit_confirmation_popup()
@@ -532,8 +476,7 @@ class SurveyModule(BaseModule):
             return True
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 설문 자동 답변 및 제출 실패: {str(e)}")
+            self.log_error(f"설문 자동 답변 및 제출 실패: {str(e)}")
             
             # 오류 발생 시 원래 창으로 돌아가기
             try:
@@ -546,8 +489,7 @@ class SurveyModule(BaseModule):
     def handle_survey_popup(self):
         """설문 시작 시 나타날 수 있는 팝업을 처리합니다."""
         try:
-            if self.gui_logger:
-                self.log_info("설문 시작 팝업 확인 중...")
+            self.log_info("설문 시작 팝업 확인 중...")
             
             # 팝업이 나타날 때까지 동적 대기
             try:
@@ -555,8 +497,7 @@ class SurveyModule(BaseModule):
                     EC.presence_of_element_located((By.CSS_SELECTOR, "#headlessui-portal-root"))
                 )
                 
-                if self.gui_logger:
-                    self.log_info("팝업 발견, 닫기 버튼 검색 중...")
+                self.log_info("팝업 발견, 닫기 버튼 검색 중...")
                 
                 # 팝업 내부에 "닫기" 버튼이 있는지 확인 (XPath 사용)
                 try:
@@ -566,14 +507,12 @@ class SurveyModule(BaseModule):
                     )
                     
                     if close_button:
-                        if self.gui_logger:
-                            self.log_info("설문 시작 팝업 발견, 닫기 버튼 클릭 중...")
+                        self.log_info("설문 시작 팝업 발견, 닫기 버튼 클릭 중...")
                         
                         # 닫기 버튼 클릭
                         close_button.click()
                         
-                        if self.gui_logger:
-                            self.log_info("✅ 설문 시작 팝업 닫기 완료")
+                        self.log_success("설문 시작 팝업 닫기 완료")
                         
                         # 팝업이 사라질 때까지 짧게 대기
                         time.sleep(0.5)
@@ -587,36 +526,29 @@ class SurveyModule(BaseModule):
                         )
                         
                         if close_button:
-                            if self.gui_logger:
-                                self.log_info("팝업 버튼 발견 (btn-primary), 클릭 중...")
+                            self.log_info("팝업 버튼 발견 (btn-primary), 클릭 중...")
                             
                             # 버튼 클릭
                             close_button.click()
                             
-                            if self.gui_logger:
-                                self.log_info("✅ 팝업 버튼 클릭 완료")
+                            self.log_success("팝업 버튼 클릭 완료")
                             
                             # 팝업이 사라질 때까지 짧게 대기
                             time.sleep(0.5)
                             
                     except NoSuchElementException:
-                        if self.gui_logger:
-                            self.log_info("팝업은 있지만 닫기 버튼을 찾을 수 없습니다")
+                        self.log_info("팝업은 있지만 닫기 버튼을 찾을 수 없습니다")
                         
                 except Exception as e:
-                    if self.gui_logger:
-                        self.log_info(f"⚠ 닫기 버튼 처리 중 오류: {str(e)}")
+                    self.log_warning(f"닫기 버튼 처리 중 오류: {str(e)}")
                         
             except TimeoutException:
-                if self.gui_logger:
-                    self.log_info("설문 시작 팝업이 없습니다. 바로 진행합니다.")
+                self.log_info("설문 시작 팝업이 없습니다. 바로 진행합니다.")
             except Exception as e:
-                if self.gui_logger:
-                    self.log_info(f"⚠ 팝업 처리 중 오류: {str(e)}")
+                self.log_warning(f"팝업 처리 중 오류: {str(e)}")
                     
         except Exception as e:
-            if self.gui_logger:
-                self.log_info(f"⚠ 팝업 확인 중 오류: {str(e)}")
+            self.log_warning(f"팝업 확인 중 오류: {str(e)}")
     
     def _handle_submit_confirmation_popup(self):
         """제출 확인 팝업에서 확인 버튼을 자동으로 클릭합니다."""
@@ -642,20 +574,16 @@ class SurveyModule(BaseModule):
                     continue
             
             if confirm_button:
-                if self.gui_logger:
-                    self.log_info("확인 팝업 발견, 확인 버튼 클릭 중...")
+                self.log_info("확인 팝업 발견, 확인 버튼 클릭 중...")
                 
                 confirm_button.click()
                 
-                if self.gui_logger:
-                    self.log_info("✅ 확인 팝업 처리 완료")
+                self.log_success("확인 팝업 처리 완료")
             else:
-                if self.gui_logger:
-                    self.log_info("⚠ 확인 팝업을 찾을 수 없습니다")
+                self.log_warning("확인 팝업을 찾을 수 없습니다")
                     
         except Exception as e:
-            if self.gui_logger:
-                self.log_info(f"⚠ 확인 팝업 처리 중 오류: {str(e)}")
+            self.log_warning(f"확인 팝업 처리 중 오류: {str(e)}")
     
     def _run_points_check_module(self):
         """설문 완료 후 포인트 확인 모듈을 실행합니다 - BaseModule의 공통 메서드 사용"""
@@ -709,25 +637,21 @@ class SurveyModule(BaseModule):
                     missing_fields.append("체크박스")
             
             if missing_fields:
-                if self.gui_logger:
-                    self.gui_logger(f"❌ 채워지지 않은 필수 항목: {', '.join(missing_fields)}")
+                self.log_error(f"채워지지 않은 필수 항목: {', '.join(missing_fields)}")
                 return False
             
-            if self.gui_logger:
-                self.gui_logger("✅ 모든 필수 항목이 올바르게 채워졌습니다")
+            self.log_success("모든 필수 항목이 올바르게 채워졌습니다")
             
             return True
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 필수 항목 검증 중 오류: {str(e)}")
+            self.log_error(f"필수 항목 검증 중 오류: {str(e)}")
             return False
     
     def retry_fill_missing_fields(self):
         """안 채워진 필수 항목만 다시 채우기"""
         try:
-            if self.gui_logger:
-                self.gui_logger("재시도: 안 채워진 필수 항목을 다시 채우는 중...")
+            self.log_info("재시도: 안 채워진 필수 항목을 다시 채우는 중...")
             
             # 1. 라디오 버튼 그룹별로 안 선택된 것들 다시 선택
             radio_groups = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]')
@@ -748,8 +672,7 @@ class SurveyModule(BaseModule):
                                 By.CSS_SELECTOR, f'input[type="radio"][name="{name}"]'
                             )
                             first_radio.click()
-                            if self.gui_logger:
-                                self.gui_logger(f"재시도: 라디오 버튼 그룹 '{name}' 첫 번째 옵션 선택")
+                            self.log_info(f"재시도: 라디오 버튼 그룹 '{name}' 첫 번째 옵션 선택")
                         except:
                             pass
                     processed_groups.add(name)
@@ -761,8 +684,7 @@ class SurveyModule(BaseModule):
                     try:
                         text_input.clear()
                         text_input.send_keys("없습니다.")
-                        if self.gui_logger:
-                            self.gui_logger(f"재시도: 텍스트 입력 필드 {i+1}번 답변 입력")
+                        self.log_info(f"재시도: 텍스트 입력 필드 {i+1}번 답변 입력")
                     except:
                         pass
             
@@ -774,8 +696,7 @@ class SurveyModule(BaseModule):
                     try:
                         email_input.clear()
                         email_input.send_keys("a@gmail.com")
-                        if self.gui_logger:
-                            self.gui_logger(f"재시도: 이메일 필드 {i+1}번 답변 입력")
+                        self.log_info(f"재시도: 이메일 필드 {i+1}번 답변 입력")
                     except:
                         pass
             
@@ -786,8 +707,7 @@ class SurveyModule(BaseModule):
                     try:
                         textarea.clear()
                         textarea.send_keys("없습니다.")
-                        if self.gui_logger:
-                            self.gui_logger(f"재시도: textarea 필드 {i+1}번 답변 입력")
+                        self.log_info(f"재시도: textarea 필드 {i+1}번 답변 입력")
                     except:
                         pass
             
@@ -814,8 +734,7 @@ class SurveyModule(BaseModule):
                         
                         if clickable_checkbox and not clickable_checkbox.is_selected():
                             clickable_checkbox.click()
-                            if self.gui_logger:
-                                self.gui_logger("재시도: 체크박스 선택")
+                            self.log_info("재시도: 체크박스 선택")
                     except:
                         pass
             
@@ -823,15 +742,13 @@ class SurveyModule(BaseModule):
             return self.validate_required_fields()
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 재시도 중 오류: {str(e)}")
+            self.log_error(f"재시도 중 오류: {str(e)}")
             return False
     
     def auto_fill_questions_in_order(self):
         """문제 순서대로 하나씩 처리합니다."""
         try:
-            if self.gui_logger:
-                self.log_info("문제 순서대로 처리 시작...")
+            self.log_info("문제 순서대로 처리 시작...")
             
             # 모든 질문 요소를 순서대로 찾기
             questions = self.web_automation.driver.find_elements(
@@ -853,8 +770,7 @@ class SurveyModule(BaseModule):
                     if not question_number:
                         continue
                     
-                    if self.gui_logger:
-                        self.log_info(f"문제 {question_number}번 처리 중...")
+                    self.log_info(f"문제 {question_number}번 처리 중...")
                     
                     # 🔥 문제 제목 추출 (퀴즈 여부 판단용)
                     question_text = ""
@@ -893,19 +809,17 @@ class SurveyModule(BaseModule):
                         if is_quiz:
                             # 퀴즈 정답 조회 (원본 문제 텍스트로 - get_answer에서 정규화함)
                             quiz_answer = self.problem_manager.get_answer(question_text)
-                            if self.gui_logger:
-                                if quiz_answer:
-                                    self.gui_logger(f"✅ 퀴즈 정답 발견: {normalized_question[:40]}... → {quiz_answer}")
-                                else:
-                                    self.gui_logger(f"⚠️ 퀴즈이지만 정답 미등록: {normalized_question[:45]}...")
+                            if quiz_answer:
+                                self.log_success(f"퀴즈 정답 발견: {normalized_question[:40]}... → {quiz_answer}")
+                            else:
+                                self.log_warning(f"퀴즈이지만 정답 미등록: {normalized_question[:45]}...")
                                     
                             if not quiz_answer:
                                 # 퀴즈지만 정답이 없는 경우, 보기 선택하지 않고 '설문문제' 창 띄우기
                                 if hasattr(self, 'gui_callbacks') and 'gui_instance' in self.gui_callbacks:
                                     gui = self.gui_callbacks['gui_instance']
                                     if hasattr(gui, 'root') and hasattr(gui, 'open_survey_problem'):
-                                        if self.gui_logger:
-                                            self.gui_logger(f"⚠️ 문제 {question_number}번: 정답 미등록. 설문 문제 자동 관리 창을 엽니다.")
+                                        self.log_warning(f"문제 {question_number}번: 정답 미등록. 설문 문제 자동 관리 창을 엽니다.")
 
                                         # 스크린샷 캡처 (특히 헤드리스 모드에서 유용)
                                         screenshot_path = os.path.join(os.getcwd(), "survey_quiz_temp.png")
@@ -915,11 +829,9 @@ class SurveyModule(BaseModule):
                                             time.sleep(0.5)  # 스크롤 후 안정화 대기
                                             
                                             self.web_automation.driver.save_screenshot(screenshot_path)
-                                            if self.gui_logger:
-                                                self.gui_logger(f"📸 {question_number}번 문제 위치로 스크롤하여 캡처했습니다.")
+                                            self.log_info(f"📸 {question_number}번 문제 위치로 스크롤하여 캡처했습니다.")
                                         except Exception as e:
-                                            if self.gui_logger:
-                                                self.gui_logger(f"⚠️ 스크린샷 캡처 실패: {str(e)}")
+                                            self.log_warning(f"스크린샷 캡처 실패: {str(e)}")
                                             screenshot_path = None
                                         
                                         # 카테고리 추출 (페이지 타이틀에서)
@@ -950,8 +862,7 @@ class SurveyModule(BaseModule):
                                         gui.root.after(0, lambda q=display_question, c=category, img=screenshot_path: gui.open_survey_problem(initial_question=q, initial_category=c, image_path=img))
                                         
                                         # 정답이 새로 등록될 때까지 대기
-                                        if self.gui_logger:
-                                            self.gui_logger(f"⌛ 문제 {question_number}번 정답이 등록될 때까지 대기합니다...")
+                                        self.log_info(f"⌛ 문제 {question_number}번 정답이 등록될 때까지 대기합니다...")
                                         
                                         waiting_count = 0
                                         while True:
@@ -969,13 +880,11 @@ class SurveyModule(BaseModule):
                                             new_answer = self.problem_manager.get_answer(question_text)
                                             if new_answer:
                                                 quiz_answer = new_answer
-                                                if self.gui_logger:
-                                                    self.gui_logger(f"✅ 새로운 정답 확인완료, 답변을 계속 진행합니다: {quiz_answer}")
+                                                self.log_success(f"새로운 정답 확인완료, 답변을 계속 진행합니다: {quiz_answer}")
                                                 break
                                                 
                                             if waiting_count > 300: # 5분 타임아웃
-                                                if self.gui_logger:
-                                                    self.gui_logger("❌ 대기 시간(5분) 초과로 설문 자동 답변을 중단합니다.")
+                                                self.log_error("대기 시간(5분) 초과로 설문 자동 답변을 중단합니다.")
                                                 return False
                                                 
                             if not quiz_answer:
@@ -998,8 +907,7 @@ class SurveyModule(BaseModule):
                                             target_radio = radios[answer_num - 1]  # 0부터 시작하므로 -1
                                             if not target_radio.is_selected():
                                                 target_radio.click()
-                                                if self.gui_logger:
-                                                    self.log_info(f"문제 {question_number}번: 퀴즈 정답 {answer_value}번 선택")
+                                                self.log_info(f"문제 {question_number}번: 퀴즈 정답 {answer_value}번 선택")
                                                 question_processed = True
                                                 radio_selected = True
                                     
@@ -1015,8 +923,7 @@ class SurveyModule(BaseModule):
                                                 if answer_value.upper() in option_text.upper() or option_text.upper() in answer_value.upper():
                                                     if not radio.is_selected():
                                                         radio.click()
-                                                        if self.gui_logger:
-                                                            self.log_info(f"문제 {question_number}번: 퀴즈 정답 '{answer_value}' 선택")
+                                                        self.log_success(f"문제 {question_number}번: 퀴즈 정답 '{answer_value}' 선택")
                                                         question_processed = True
                                                         radio_selected = True
                                                     break
@@ -1027,12 +934,10 @@ class SurveyModule(BaseModule):
                                     if not radio_selected:
                                         if not first_input.is_selected():
                                             first_input.click()
-                                            if self.gui_logger:
-                                                self.gui_logger(f"⚠️ 문제 {question_number}번: 퀴즈 정답 '{answer_value}' 미등록, 첫 번째 옵션 선택")
+                                            self.log_warning(f"문제 {question_number}번: 퀴즈 정답 '{answer_value}' 미등록, 첫 번째 옵션 선택")
                                             question_processed = True
                                 except Exception as e:
-                                    if self.gui_logger:
-                                        self.gui_logger(f"❌ 문제 {question_number}번 퀴즈 정답 선택 오류: {str(e)}")
+                                    self.log_error(f"문제 {question_number}번 퀴즈 정답 선택 오류: {str(e)}")
                                     if not first_input.is_selected():
                                         first_input.click()
                                         question_processed = True
@@ -1040,8 +945,7 @@ class SurveyModule(BaseModule):
                                 # 일반 문제: 첫 번째 옵션 선택
                                 if not first_input.is_selected():
                                     first_input.click()
-                                    if self.gui_logger:
-                                        self.log_info(f"문제 {question_number}번: 라디오 버튼 첫 번째 옵션 선택")
+                                    self.log_info(f"문제 {question_number}번: 라디오 버튼 첫 번째 옵션 선택")
                                     question_processed = True
                                 
                         elif input_type == 'checkbox':
@@ -1051,8 +955,7 @@ class SurveyModule(BaseModule):
                                 clickable_checkbox = checkbox_inputs[1]
                                 if not clickable_checkbox.is_selected():
                                     clickable_checkbox.click()
-                                    if self.gui_logger:
-                                        self.log_info(f"문제 {question_number}번: 체크박스 첫 번째 옵션 선택")
+                                    self.log_info(f"문제 {question_number}번: 체크박스 첫 번째 옵션 선택")
                                     question_processed = True
                                 
                         elif input_type == 'text':
@@ -1061,8 +964,7 @@ class SurveyModule(BaseModule):
                                 first_input.clear()
                                 text_to_enter = "없습니다."
                                 first_input.send_keys(text_to_enter)
-                                if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: 텍스트 '{text_to_enter}' 자동 입력 완료")
+                                self.log_info(f"문제 {question_number}번: 텍스트 '{text_to_enter}' 자동 입력 완료")
                                 question_processed = True
                                 
                         elif input_type == 'email':
@@ -1071,8 +973,7 @@ class SurveyModule(BaseModule):
                             if not email_value or '@' not in email_value:
                                 first_input.clear()
                                 first_input.send_keys("a@gmail.com")
-                                if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: 이메일 입력 답변 완료")
+                                self.log_info(f"문제 {question_number}번: 이메일 입력 답변 완료")
                                 question_processed = True
                                 
                         elif first_input.tag_name == 'textarea': # input_type for textarea is usually None or empty string, so check tag_name
@@ -1080,33 +981,27 @@ class SurveyModule(BaseModule):
                             if not first_input.get_attribute('value'):
                                 text_to_enter = "없습니다."
                                 first_input.send_keys(text_to_enter)
-                                if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: 주관식 '{text_to_enter}' 자동 입력 완료")
+                                self.log_info(f"문제 {question_number}번: 주관식 '{text_to_enter}' 자동 입력 완료")
                             else:
-                                if self.gui_logger:
-                                    self.log_info(f"문제 {question_number}번: 주관식 이미 입력되어 있음")
+                                self.log_info(f"문제 {question_number}번: 주관식 이미 입력되어 있음")
                                 
                     except Exception as e:
-                        if self.gui_logger:
-                            self.gui_logger(f"문제 {question_number}번 처리 중 오류: {str(e)}")
+                        self.log_error(f"문제 {question_number}번 처리 중 오류: {str(e)}")
                         pass
                     
                     if question_processed:
                         processed_count += 1
                     
                 except Exception as e:
-                    if self.gui_logger:
-                        self.gui_logger(f"문제 {question_number}번 처리 중 오류: {str(e)}")
+                    self.log_error(f"문제 {question_number}번 처리 중 오류: {str(e)}")
                     continue
             
-            if self.gui_logger:
-                self.log_info(f"✅ 총 {processed_count}개 문제 순서대로 처리 완료")
+            self.log_info(f"✅ 총 {processed_count}개 문제 순서대로 처리 완료")
             
             return True
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 문제 순서대로 처리 실패: {str(e)}")
+            self.log_error(f"문제 순서대로 처리 실패: {str(e)}")
             return False
     
     def _normalize_question_text(self, question: str) -> str:
@@ -1137,8 +1032,7 @@ class SurveyModule(BaseModule):
                         radio.click()
                         processed_groups.add(name)
                         selected_count += 1
-                        if self.gui_logger:
-                            self.gui_logger(f"객관식 {selected_count}번 첫 번째 보기 선택 완료")
+                        self.log_info(f"객관식 {selected_count}번 첫 번째 보기 선택 완료")
                 except:
                     continue
             
@@ -1152,8 +1046,7 @@ class SurveyModule(BaseModule):
                     if not checkbox.is_selected():
                         checkbox.click()
                         checkbox_count += 1
-                        if self.gui_logger:
-                            self.gui_logger(f"체크박스 {checkbox_count}번 선택 완료")
+                        self.log_info(f"체크박스 {checkbox_count}번 선택 완료")
                 except:
                     continue
             
@@ -1166,8 +1059,7 @@ class SurveyModule(BaseModule):
                     text_input.clear()
                     text_input.send_keys("없습니다.")
                     text_count += 1
-                    if self.gui_logger:
-                        self.gui_logger(f"주관식 {text_count}번 답변 입력 완료")
+                    self.log_info(f"주관식 {text_count}번 답변 입력 완료")
                 except:
                     continue
             
@@ -1180,8 +1072,7 @@ class SurveyModule(BaseModule):
                     email_input.clear()
                     email_input.send_keys("a@gmail.com")
                     email_count += 1
-                    if self.gui_logger:
-                        self.gui_logger(f"이메일 {email_count}번 답변 입력 완료")
+                    self.log_info(f"이메일 {email_count}번 답변 입력 완료")
                 except:
                     continue
             
@@ -1194,17 +1085,14 @@ class SurveyModule(BaseModule):
                     textarea.clear()
                     textarea.send_keys("없습니다.")
                     textarea_count += 1
-                    if self.gui_logger:
-                        self.gui_logger(f"textarea {textarea_count}번 답변 입력 완료")
+                    self.log_info(f"textarea {textarea_count}번 답변 입력 완료")
                 except:
                     continue
             
-            if self.gui_logger:
-                self.gui_logger(f"✅ 객관식 {selected_count}개, 체크박스 {checkbox_count}개, 주관식 {text_count}개, 이메일 {email_count}개, textarea {textarea_count}개 자동 답변 완료")
+            self.log_success(f"객관식 {selected_count}개, 체크박스 {checkbox_count}개, 주관식 {text_count}개, 이메일 {email_count}개, textarea {textarea_count}개 자동 답변 완료")
             
             return True
             
         except Exception as e:
-            if self.gui_logger:
-                self.gui_logger(f"❌ 자동 답변 실패: {str(e)}")
+            self.log_error(f"자동 답변 실패: {str(e)}")
             return False

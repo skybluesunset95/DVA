@@ -106,28 +106,29 @@ class QuizModuleNew(BaseModule):
                 self.log_warning("두 페이지 모두에 퀴즈 요소가 없습니다.")
                 self.log_warning("오늘은 퀴즈가 제공되지 않습니다.")
                 self._check_points_after_quiz()
-                return False
+                return self.create_result(False, "오늘은 퀴즈가 제공되지 않습니다.")
             
             # 2단계: 퀴즈 팝업 열기
             if not self.open_quiz_popup():
-                return False
+                return self.create_result(False, "퀴즈 팝업 열기 실패")
             
             # 3단계: 블로그 검색으로 정답 얻기
             answer = self.get_answer_from_blog()
             if not answer:
                 self.log_error("블로그 검색 실패로 퀴즈를 중단합니다")
-                return False
+                return self.create_result(False, "블로그 검색 실패로 퀴즈 중단")
             
             # 4단계: 퀴즈 풀기
             if self.solve_quiz(answer):
                 self._check_points_after_quiz()
-                return True
+                return self.create_result(True, "퀴즈 풀기 완료")
             else:
-                return False
+                return self.create_result(False, "퀴즈 풀기 중 오류 발생")
             
         except Exception as e:
-            self.log_error(f"퀴즈풀기 실행 실패: {str(e)}")
-            return False
+            error_msg = f"퀴즈풀기 실행 실패: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
 
     def find_quiz_page(self):
         """1단계: 퀴즈가 있는 페이지 찾기"""
@@ -717,7 +718,14 @@ class QuizModuleNew(BaseModule):
             # 블로그 검색 실행 시도
             try:
                 result = blog_search_module.execute()
-                if result:
+                
+                is_success = False
+                if isinstance(result, dict):
+                    is_success = result.get('success', False)
+                else:
+                    is_success = bool(result)
+
+                if is_success:
                     answer = blog_search_module.get_extracted_answer()
                     if answer:
                         return answer
@@ -725,7 +733,8 @@ class QuizModuleNew(BaseModule):
                         self.log_warning("블로그 검색 완료되었지만 정답을 추출하지 못했습니다")
                         return None
                 else:
-                    self.log_warning("블로그 검색 실행 실패")
+                    msg = result.get('message', '블로그 검색 실행 실패') if isinstance(result, dict) else '블로그 검색 실행 실패'
+                    self.log_warning(msg)
                     return None
                     
             except Exception as exec_error:

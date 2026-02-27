@@ -35,18 +35,17 @@ class AttendanceModule(BaseModule):
         """출석체크 페이지로 이동하고 포인트 받기 버튼 클릭"""
         try:
             if not self.web_automation.driver:
-                self.log_error(ERROR_WEBDRIVER_NOT_INITIALIZED)
-                return False
+                return self.create_result(False, ERROR_WEBDRIVER_NOT_INITIALIZED)
             
             self.log_info("출석체크 페이지로 이동 중...")
             
             # 출석체크 페이지로 이동
             if not self._navigate_to_attendance_page():
-                return False
+                return self.create_result(False, ERROR_ATTENDANCE_PAGE_NAVIGATION)
             
             # 출석하기 버튼 클릭
             if not self.click_attend_button():
-                return False
+                return self.create_result(False, ERROR_ATTEND_BUTTON_CLICK)
             
             # 출석체크 완료
             self.log_info("출석체크 완료!")
@@ -54,11 +53,12 @@ class AttendanceModule(BaseModule):
             # 출석체크 후 자동으로 포인트 상태 확인
             self._check_points_after_attendance()
             
-            return True
+            return self.create_result(True, "출석체크 성공")
             
         except Exception as e:
-            self.log_error(f"{ERROR_ATTENDANCE_EXECUTION}: {str(e)}")
-            return False
+            error_msg = f"{ERROR_ATTENDANCE_EXECUTION}: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
     
     def _navigate_to_attendance_page(self):
         """출석체크 페이지로 이동"""

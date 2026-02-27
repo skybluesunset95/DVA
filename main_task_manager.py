@@ -8,7 +8,15 @@ import threading
 import logging
 from datetime import datetime
 from web_automation import WebAutomation
-from modules.base_module import BaseModule
+from modules.base_module import (
+    BaseModule,
+    STATUS_ATTENDANCE_COMPLETE, 
+    STATUS_ATTENDANCE_INCOMPLETE,
+    STATUS_QUIZ_COMPLETE, 
+    STATUS_QUIZ_INCOMPLETE,
+    STATUS_KEY_ATTENDANCE, 
+    STATUS_KEY_QUIZ
+)
 
 class TaskManagerState:
     """TaskManager 상태를 체계적으로 관리하는 클래스"""
@@ -20,6 +28,31 @@ class TaskManagerState:
         self._module_queue = []
         self._last_activity = None
         self._logger = logging.getLogger(__name__)
+        
+        # 스케줄러 상태
+        self._last_auto_attendance_date = None
+        self._last_auto_quiz_date = None
+        self._startup_time = datetime.now()
+    
+    @property
+    def last_auto_attendance_date(self):
+        return self._last_auto_attendance_date
+    
+    @last_auto_attendance_date.setter
+    def last_auto_attendance_date(self, value):
+        self._last_auto_attendance_date = value
+
+    @property
+    def last_auto_quiz_date(self):
+        return self._last_auto_quiz_date
+    
+    @last_auto_quiz_date.setter
+    def last_auto_quiz_date(self, value):
+        self._last_auto_quiz_date = value
+
+    @property
+    def startup_time(self):
+        return self._startup_time
     
     @property
     def web_automation(self):
@@ -119,7 +152,9 @@ class ModuleFactory:
         'attendance': ('modules.attendance_module', 'AttendanceModule'),
         'quiz': ('modules.quiz_module_new', 'QuizModuleNew'),
         'survey': ('modules.survey_module', 'SurveyModule'),
-        'seminar': ('modules.seminar_module', 'SeminarModule')
+        'seminar': ('modules.seminar_module', 'SeminarModule'),
+        'baemin': ('modules.baemin_module', 'BaeminModule'),
+        'points': ('modules.points_check_module', 'PointsCheckModule')
     }
     
     # 간단한 모듈 설정 - 로그인 체크 필요 여부만 관리
@@ -245,15 +280,25 @@ class TaskManager:
             
 
             
-            if module.execute():
-                self.log_success(module_name, gui_callbacks)
-                self.handle_special_actions(module_name, 'success')
-                
-                # 로그인 성공 시에는 LoginModule에서 자동으로 포인트 체크 수행
-                # (출석체크와 동일한 방식으로 깔끔하게 처리)
-                
+            # 모듈 실행
+            result = module.execute()
+            
+            # 결과 해석 (딕셔너리 또는 불리언 대응)
+            is_success = False
+            message = ""
+            if isinstance(result, dict):
+                is_success = result.get('success', False)
+                message = result.get('message', '')
+                if message:
+                    self.logger.info(f"[{module_name}] {message}")
             else:
-                self.log_failure(module_name, gui_callbacks)
+                is_success = bool(result)
+            
+            if is_success:
+                self.log_success(module_name, gui_callbacks, message)
+                self.handle_special_actions(module_name, 'success')
+            else:
+                self.log_failure(module_name, gui_callbacks, message)
                 self.handle_special_actions(module_name, 'failure')
                 
         except Exception as e:
@@ -307,9 +352,326 @@ class TaskManager:
         return self.execute_module_by_config('survey', gui_callbacks)
     
     def execute_seminar(self, gui_callbacks):
-        """라이브세미나 확인 실행"""
-        # 설정 기반으로 모듈 실행 (하드코딩 제거)
-        return self.execute_module_by_config('seminar', gui_callbacks)
+        """라이브 세미나 정보를 확인하고 다이얼로그를 표시합니다."""
+        def _run():
+            try:
+                self.state.current_module = 'seminar_view'
+                module_class = self.get_module_class('seminar')
+                web_auto = self.state.web_automation or self.initialize_web_automation()
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+                
+                gui_callbacks['log_message']("🚀 라이브세미나 정보 수집을 시작합니다...")
+                gui_callbacks['update_status']("세미나 정보 수집 중...")
+                
+                seminars_res = seminar.get_seminar_list()
+                if isinstance(seminars_res, dict):
+                    seminars = seminars_res.get('data', [])
+                else:
+                    seminars = seminars_res
+                
+                if not seminars:
+                    gui_callbacks['log_message']("⚠ 세미나 정보를 찾을 수 없습니다.")
+                    return
+
+                # UI 스레드에서 다이얼로그 띄우기
+                if 'show_seminar_dialog' in gui_callbacks:
+                    dialog_callbacks = {
+                        'on_apply': lambda checked: self._handle_seminar_batch_action(checked, 'apply', gui_callbacks),
+                        'on_cancel': lambda checked: self._handle_seminar_batch_action(checked, 'cancel', gui_callbacks),
+                        'on_refresh': lambda: self._handle_seminar_refresh(gui_callbacks),
+                        'on_action': lambda link, status: self._handle_seminar_single_action(link, status, gui_callbacks),
+                        'log_message': gui_callbacks['log_message']
+                    }
+                    gui_callbacks['show_seminar_dialog'](seminars, dialog_callbacks)
+                
+            except Exception as e:
+                self.logger.error(f"세미나 확인 오류: {str(e)}")
+                if 'log_error' in gui_callbacks:
+                    gui_callbacks['log_error'](f"세미나 확인 중 오류: {str(e)}")
+            finally:
+                self.state.current_module = None
+                gui_callbacks['update_status']("대기 중")
+
+        threading.Thread(target=_run, daemon=True).start()
+        return True
+
+    def _handle_seminar_batch_action(self, checked_list, action_type, gui_callbacks):
+        """세미나 일괄 처리 (신청/취소)"""
+        if not checked_list:
+            gui_callbacks['log_message']("⚠ 선택된 세미나가 없습니다.")
+            return
+
+        def _run():
+            try:
+                module_class = self.get_module_class('seminar')
+                web_auto = self.state.web_automation or self.initialize_web_automation()
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+
+                success_count = 0
+                for i, item in enumerate(checked_list, 1):
+                    title = item['title']
+                    gui_callbacks['log_message'](f"[{i}/{len(checked_list)}] {title} {action_type} 중...")
+                    
+                    status_to_send = '신청완료' if action_type == 'cancel' else '신청가능'
+                    result = seminar.handle_seminar_action(item['detail_link'], status_to_send)
+                    success = result.get('success', False) if isinstance(result, dict) else bool(result)
+                    
+                    if success:
+                        success_count += 1
+                        gui_callbacks['log_message'](f"✅ {title} 완료")
+                    else:
+                        msg = result.get('message', '실패') if isinstance(result, dict) else '실패'
+                        gui_callbacks['log_message'](f"❌ {title} {msg}")
+                    time.sleep(0.5)
+
+                gui_callbacks['log_message'](f"🎉 일괄 처리 완료! 성공: {success_count}개")
+                self._handle_seminar_refresh(gui_callbacks)
+            except Exception as e:
+                gui_callbacks['log_error'](f"일괄 처리 중 오류: {str(e)}")
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _handle_seminar_single_action(self, link, status, gui_callbacks):
+        """개별 세미나 액션 처리 (더블클릭)"""
+        def _run():
+            try:
+                module_class = self.get_module_class('seminar')
+                web_auto = self.state.web_automation or self.initialize_web_automation()
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+
+                result = seminar.handle_seminar_action(link, status)
+                success = result.get('success', False) if isinstance(result, dict) else bool(result)
+                if success:
+                    gui_callbacks['log_message']("✅ 작업 완료")
+                    self._handle_seminar_refresh(gui_callbacks)
+                else:
+                    msg = result.get('message', '작업 실패') if isinstance(result, dict) else '작업 실패'
+                    gui_callbacks['log_message'](f"❌ {msg}")
+            except Exception as e:
+                gui_callbacks['log_error'](f"세미나 작업 중 오류: {str(e)}")
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _handle_seminar_refresh(self, gui_callbacks):
+        """세미나 목록 새로고침"""
+        def _run():
+            try:
+                module_class = self.get_module_class('seminar')
+                web_auto = self.state.web_automation or self.initialize_web_automation()
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+
+                gui_callbacks['log_message']("🔄 세미나 목록을 새로고침합니다...")
+                seminars_res = seminar.get_seminar_list()
+                if isinstance(seminars_res, dict):
+                    seminars = seminars_res.get('data', [])
+                else:
+                    seminars = seminars_res
+                
+                if 'update_seminar_dialog' in gui_callbacks:
+                    gui_callbacks['update_seminar_dialog'](seminars)
+                
+            except Exception as e:
+                gui_callbacks['log_error'](f"새로고침 중 오류: {str(e)}")
+
+        threading.Thread(target=_run, daemon=True).start()
+    
+    def get_baemin_info(self, gui_callbacks):
+        """배민 쿠폰 구매를 위한 초기 정보(포인트, 번호)를 가져옵니다."""
+        try:
+            self.state.current_module = 'baemin'
+            module_class = self.get_module_class('baemin')
+            web_auto = self.state.web_automation or self.initialize_web_automation()
+            gui_logger = self.create_gui_logger(gui_callbacks)
+            
+            baemin = module_class(web_auto, gui_logger)
+            baemin.set_callbacks(gui_callbacks)
+            
+            points_res = baemin.get_current_points()
+            if isinstance(points_res, dict):
+                points = points_res.get('data', 0)
+            else:
+                points = points_res
+                
+            max_coupons = baemin.calculate_max_coupons(points)
+            
+            phone_res = baemin.get_phone_number()
+            if isinstance(phone_res, dict):
+                phone = phone_res.get('data', '')
+            else:
+                phone = phone_res or ''
+            
+            return {
+                'points': points,
+                'max_coupons': max_coupons,
+                'phone': phone
+            }
+        except Exception as e:
+            self.logger.error(f"배민 정보 조회 오류: {str(e)}")
+            raise
+        finally:
+            self.state.current_module = None
+
+    def execute_baemin_purchase(self, quantity, phone, gui_callbacks):
+        """배민 쿠폰 구매를 실행합니다."""
+        def _run():
+            try:
+                self.state.current_module = 'baemin'
+                module_class = self.get_module_class('baemin')
+                web_auto = self.state.web_automation or self.initialize_web_automation()
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                
+                baemin = module_class(web_auto, gui_logger)
+                baemin.set_callbacks(gui_callbacks)
+                
+                result = baemin.execute(quantity=quantity, phone_number=phone)
+                
+                is_success = False
+                message = ""
+                if isinstance(result, dict):
+                    is_success = result.get('success', False)
+                    message = result.get('message', '')
+                else:
+                    is_success = bool(result)
+                    
+                if is_success:
+                    self.log_success("배민 쿠폰 구매", gui_callbacks, message)
+                else:
+                    self.log_failure("배민 쿠폰 구매", gui_callbacks, message)
+            except Exception as e:
+                self.log_error("배민 쿠폰 구매", str(e), gui_callbacks)
+            finally:
+                self.state.current_module = None
+        
+        threading.Thread(target=_run, daemon=True).start()
+
+    def get_seminar_list(self, gui_callbacks):
+        """최신 세미나 목록을 수집하여 반환합니다."""
+        try:
+            self.state.current_module = 'seminar_collect'
+            module_class = self.get_module_class('seminar')
+            web_auto = self.state.web_automation or self.initialize_web_automation()
+            gui_logger = self.create_gui_logger(gui_callbacks)
+            
+            seminar = module_class(web_auto, gui_logger)
+            seminar.set_callbacks(gui_callbacks)
+            
+            result = seminar.collect_seminar_info_only()
+            if isinstance(result, dict):
+                return result.get('data', [])
+            return result
+        except Exception as e:
+            self.logger.error(f"세미나 목록 수집 오류: {str(e)}")
+            return []
+        finally:
+            self.state.current_module = None
+
+    def auto_apply_and_refresh_seminars(self, gui_callbacks):
+        """세미나 자동 신청 및 목록 새로고침을 수행합니다."""
+        try:
+            # 이 작업은 백그라운드 스레드에서 실행되므로 직접 클래스 생성
+            module_class = self.get_module_class('seminar')
+            web_auto = self.state.web_automation or self.initialize_web_automation()
+            gui_logger = self.create_gui_logger(gui_callbacks)
+            
+            seminar = module_class(web_auto, gui_logger)
+            seminar.set_callbacks(gui_callbacks)
+            
+            result = seminar.auto_apply_available_seminars()
+            # auto_apply_available_seminars가 튜플 (count, list)을 반환하는지, dict를 반환하는지 처리
+            if isinstance(result, dict):
+                data = result.get('data', {})
+                return data.get('count', 0), data.get('seminars', [])
+            return result
+        except Exception as e:
+            self.logger.error(f"세미나 자동 신청/새로고침 오류: {str(e)}")
+            return 0, []
+
+    def auto_enter_seminar(self, link, title, gui_callbacks):
+        """특정 세미나에 자동으로 입장합니다."""
+        try:
+            self.state.current_module = 'auto_enter'
+            module_class = self.get_module_class('seminar')
+            web_auto = self.state.web_automation or self.initialize_web_automation()
+            gui_logger = self.create_gui_logger(gui_callbacks)
+            
+            # 상대 경로 처리
+            full_link = link
+            if link.startswith('/'):
+                full_link = "https://www.doctorville.co.kr" + link
+            
+            web_auto.driver.get(full_link)
+            time.sleep(2)
+            
+            seminar = module_class(web_auto, gui_logger)
+            seminar.set_callbacks(gui_callbacks)
+            
+            result = seminar.enter_seminar()
+            if isinstance(result, dict):
+                return result.get('success', False)
+            return bool(result)
+        except Exception as e:
+            self.logger.error(f"세미나 자동 입장 오류: {str(e)}")
+            return False
+        finally:
+            self.state.current_module = None
+    
+    def check_scheduled_tasks(self, settings, gui_callbacks):
+        """설정된 시간에 맞춰 자동 작업을 실행합니다."""
+        try:
+            # 브라우저가 준비되지 않았거나 다른 작업이 실행 중이면 건너뛰기
+            if self.state.web_automation is None or self.state.current_module is not None:
+                return False
+
+            now = datetime.now()
+            today = now.date()
+            
+            # 1. 자동 출석체크 체크
+            if settings.get('auto_attendance') and self.state.last_auto_attendance_date != today:
+                sch_hour = settings.get('auto_attendance_hour')
+                sch_min = settings.get('auto_attendance_min')
+                
+                # 예약 시간 (오늘)
+                scheduled_time = now.replace(hour=sch_hour, minute=sch_min, second=0, microsecond=0)
+                
+                # 현재 시간이 예약 시간 이후이고, 프로그램 시작 시간 이후인 경우에만 실행
+                if now >= scheduled_time and scheduled_time >= self.state.startup_time:
+                    gui_callbacks['log_message'](f"⏰ 예약된 자동 출석체크를 시작합니다. (설정시간: {sch_hour:02d}:{sch_min:02d})")
+                    gui_callbacks['update_status']("자동 출석체크 중...")
+                    self.execute_attendance(gui_callbacks)
+                    self.state.last_auto_attendance_date = today
+                    return True
+
+            # 2. 자동 퀴즈풀기 체크
+            if settings.get('auto_quiz') and self.state.last_auto_quiz_date != today:
+                sch_hour = settings.get('auto_quiz_hour')
+                sch_min = settings.get('auto_quiz_min')
+                
+                # 예약 시간 (오늘)
+                scheduled_time = now.replace(hour=sch_hour, minute=sch_min, second=0, microsecond=0)
+                
+                # 현재 시간이 예약 시간 이후이고, 프로그램 시작 시간 이후인 경우에만 실행
+                if now >= scheduled_time and scheduled_time >= self.state.startup_time:
+                    gui_callbacks['log_message'](f"⏰ 예약된 자동 퀴즈풀기를 시작합니다. (설정시간: {sch_hour:02d}:{sch_min:02d})")
+                    gui_callbacks['update_status']("자동 퀴즈풀기 중...")
+                    self.execute_quiz(gui_callbacks)
+                    self.state.last_auto_quiz_date = today
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            if 'log_error' in gui_callbacks:
+                gui_callbacks['log_error'](f"스케줄 작업 체크 중 오류: {str(e)}")
+            return False
     
     def get_module_class(self, module_type):
         """모듈 클래스 캐시에서 가져오기 - 성능 최적화"""
@@ -324,17 +686,17 @@ class TaskManager:
         
         return self._module_cache[module_type]
     
-    def log_success(self, module_name, gui_callbacks):
+    def log_success(self, module_name, gui_callbacks, custom_message=""):
         """성공 로깅 - 일관된 방식"""
-        message = f"{module_name} 완료"
+        message = custom_message if custom_message else f"{module_name} 완료"
         gui_callbacks['log_and_update_status'](message, message)
-        self.logger.info(f"모듈 실행 성공: {module_name}")
+        self.logger.info(message)
     
-    def log_failure(self, module_name, gui_callbacks):
+    def log_failure(self, module_name, gui_callbacks, custom_message=""):
         """실패 로깅 - 일관된 방식"""
-        message = f"{module_name} 실패"
+        message = custom_message if custom_message else f"{module_name} 실패"
         gui_callbacks['log_and_update_status'](message, message)
-        self.logger.warning(f"모듈 실행 실패: {module_name}")
+        self.logger.warning(message)
     
     def log_error(self, module_name, error_msg, gui_callbacks):
         """오류 로깅 - 일관된 방식"""

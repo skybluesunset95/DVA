@@ -233,3 +233,7 @@ tmp/
 # AI Agent 관련 파일들
 .agent/
 .gemini/
+
+# 마크다운 파일(README.md 제외)
+*.md
+!README.md
