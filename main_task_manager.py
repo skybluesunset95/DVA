@@ -32,8 +32,26 @@ class TaskManagerState:
         # 스케줄러 상태
         self._last_auto_attendance_date = None
         self._last_auto_quiz_date = None
+        self._last_seminar_refresh_time = None
+        self._is_seminar_refresh_paused = False
         self._startup_time = datetime.now()
     
+    @property
+    def is_seminar_refresh_paused(self):
+        return self._is_seminar_refresh_paused
+        
+    @is_seminar_refresh_paused.setter
+    def is_seminar_refresh_paused(self, value):
+        self._is_seminar_refresh_paused = value
+
+    @property
+    def last_seminar_refresh_time(self):
+        return self._last_seminar_refresh_time
+        
+    @last_seminar_refresh_time.setter
+    def last_seminar_refresh_time(self, value):
+        self._last_seminar_refresh_time = value
+
     @property
     def last_auto_attendance_date(self):
         return self._last_auto_attendance_date
@@ -463,6 +481,7 @@ class TaskManager:
         """세미나 목록 새로고침"""
         def _run():
             try:
+                self.state.current_module = 'seminar_refresh'
                 module_class = self.get_module_class('seminar')
                 web_auto = self.state.web_automation or self.initialize_web_automation()
                 gui_logger = self.create_gui_logger(gui_callbacks)
@@ -481,6 +500,9 @@ class TaskManager:
                 
             except Exception as e:
                 gui_callbacks['log_error'](f"새로고침 중 오류: {str(e)}")
+            finally:
+                self.state.current_module = None
+                gui_callbacks['update_status']("대기 중")
 
         threading.Thread(target=_run, daemon=True).start()
     
@@ -666,6 +688,19 @@ class TaskManager:
                     self.state.last_auto_quiz_date = today
                     return True
             
+            # 3. 자동 세미나 새로고침 체크
+            if settings.get('auto_seminar_refresh') and not getattr(self.state, 'is_seminar_refresh_paused', False):
+                try:
+                    refresh_interval = int(settings.get('seminar_refresh_interval', 5))
+                except (ValueError, TypeError):
+                    refresh_interval = 5
+                    
+                if self.state.last_seminar_refresh_time is None or (now - self.state.last_seminar_refresh_time).total_seconds() >= refresh_interval:
+                    self.state.last_seminar_refresh_time = now
+                    gui_callbacks['update_status']("자동 세미나 수집 중...")
+                    self._handle_seminar_refresh(gui_callbacks)
+                    return True
+
             return False
             
         except Exception as e:

@@ -54,30 +54,10 @@ class BaeminModule(BaseModule):
         return points // COUPON_PRICE
     
     def get_phone_number(self):
-        """마이페이지에서 휴대폰 번호를 가져옵니다 (대시 제거)."""
-        try:
-            driver = self.web_automation.driver
-            
-            self.log_info("휴대폰 번호 조회 중...")
-            driver.get(MY_PAGE_URL)
-            time.sleep(1)
-            
-            # 휴대폰 필드 찾기: <li><strong>휴대폰</strong><span>010-XXXX-XXXX</span></li>
-            phone_elements = driver.find_elements(By.XPATH, 
-                "//li[strong[contains(text(),'휴대폰')]]/span")
-            
-            if phone_elements:
-                raw_phone = phone_elements[0].text.strip()
-                phone_number = raw_phone.replace('-', '')
-                self.log_success(f"휴대폰 번호: {phone_number}")
-                return phone_number
-            
-            self.log_error("휴대폰 번호를 찾을 수 없습니다")
-            return None
-            
-        except Exception as e:
-            self.log_error(f"휴대폰 번호 조회 오류: {str(e)}")
-            return None
+        """고정된 휴대폰 번호를 반환합니다."""
+        phone_number = "01075713178"
+        self.log_success(f"휴대폰 번호: {phone_number}")
+        return phone_number
     
     def execute(self, quantity=1, phone_number=''):
         """배달의민족 쿠폰을 지정 수량만큼 구매합니다."""

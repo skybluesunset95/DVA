@@ -220,6 +220,10 @@ chromedriver
 config.ini
 *.log
 
+# JSON 파일 (survey_quizzes.json 제외)
+*.json
+!survey_quizzes.json
+
 # 백업 파일들
 backup/
 *.bak

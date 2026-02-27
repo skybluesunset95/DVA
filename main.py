@@ -53,7 +53,7 @@ class DoctorBillApp:
         # 5. 초기 작업 스케줄링
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.after(200, self.auto_login)
-        self.root.after(5000, self.check_scheduled_tasks)
+        self.root.after(1000, self.check_scheduled_tasks)
 
         self.ui.work_log.log_message("프로그램이 시작되었습니다.")
 
@@ -114,7 +114,7 @@ class DoctorBillApp:
             'update_user_info': self.gui_update_user_info,
             'update_display': self.gui_update_display,
             'log_and_update_status': self.log_and_update_status,
-            'show_seminar_dialog': lambda seminars, cb: show_seminar_info_dialog(self.root, seminars, cb),
+            'show_seminar_dialog': self.show_seminar_dialog,
             'update_seminar_dialog': self.update_seminar_dialog,
             'gui_instance': self
         }
@@ -178,13 +178,14 @@ class DoctorBillApp:
             self.gui_update_status("에러 발생")
 
     def on_seminar_refresh_toggle(self, btn):
-        # TODO: 실제 토글 로직은 추후 구현 가능. UI의 멈춤/재개 조작.
         current_text = btn.cget('text')
         if "멈춤" in current_text:
             btn.config(text="▶ 재개", bg="#27ae60")
+            self.task_manager.state.is_seminar_refresh_paused = True
             self.log_message("세미나 새로고침이 일시정지되었습니다.")
         else:
             btn.config(text="⏸ 멈춤", bg="#e74c3c")
+            self.task_manager.state.is_seminar_refresh_paused = False
             self.log_message("세미나 새로고침이 재개되었습니다.")
 
     def on_seminar_double_click(self, event):
@@ -259,17 +260,37 @@ class DoctorBillApp:
         self.log_message(log_msg)
         self.gui_update_status(status_msg)
         
+    def show_seminar_dialog(self, seminars, cb):
+        self._seminar_dialog_window = show_seminar_info_dialog(self.root, seminars, cb)
+
     def update_seminar_dialog(self, seminars):
         self.root.after(0, lambda: self._update_main_seminar_tree(seminars))
+        self.root.after(0, lambda: self._update_seminar_dialog_window(seminars))
+        
+    def _update_seminar_dialog_window(self, seminars):
+        if hasattr(self, '_seminar_dialog_window') and self._seminar_dialog_window.winfo_exists():
+            try:
+                self._seminar_dialog_window.refresh_data(seminars)
+            except:
+                pass
 
     def _update_main_seminar_tree(self, seminars):
         self.ui.seminar_panel.clear_all()
-        if not seminars:
+        
+        # 오늘 날짜 구하기 (ex: "2/27")
+        import datetime
+        today = datetime.datetime.now()
+        today_str = f"{today.month}/{today.day}"
+        
+        # 오늘 세미나만 필터링
+        today_seminars = [s for s in seminars if s.get('date', '') == today_str]
+        
+        if not today_seminars:
             self.ui.seminar_panel.insert_item(("", "", "", "오늘 예정된 세미나가 없습니다", "", "", ""))
             return
             
         current_date = None
-        for s in seminars:
+        for s in today_seminars:
             if current_date != s.get('date', ''):
                 current_date = s.get('date', '')
                 if current_date:
@@ -302,8 +323,8 @@ class DoctorBillApp:
 
     def check_scheduled_tasks(self):
         self.task_manager.check_scheduled_tasks(self.settings, self.get_callbacks())
-        # 반복 실행 (5초)
-        self.root.after(5000, self.check_scheduled_tasks)
+        # 반복 실행 (1초 간격으로 검사하여 딜레이 최소화)
+        self.root.after(1000, self.check_scheduled_tasks)
 
 
 def main():
