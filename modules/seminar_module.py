@@ -553,18 +553,20 @@ class SeminarModule(BaseModule):
             
             if success_count > 0:
                 self._log(f"🎉 자동 신청 완료! {success_count}/{len(available)}개 성공")
-                # 세미나 목록 페이지로 복귀
+                # 세미나 목록 페이지로 복귀하여 최신 상태 확인
                 try:
                     self.web_automation.driver.get(SEMINAR_URL)
                     self.web_automation.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, LOADING_SELECTOR)))
+                    # 최종 상태 다시 수집 (신청 결과 반영됨)
+                    seminars = self.get_seminar_info()
                 except:
                     pass
             
-            return success_count
+            return success_count, seminars
             
         except Exception as e:
             self._log(f"❌ 자동 신청 처리 중 오류: {str(e)}")
-            return 0
+            return 0, []
     
     def execute(self):
         """라이브세미나 페이지로 이동하고 세미나 정보 수집 (GUI 창 포함)"""

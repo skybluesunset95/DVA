@@ -4,8 +4,10 @@
 닥터빌 세미나 설문참여 기능을 담당합니다.
 """
 
+import os
 import threading
 import time
+import re
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -29,17 +31,32 @@ ERROR_SURVEY_PAGE_NAVIGATION = "설문참여 페이지 이동 중 오류"
 ERROR_SURVEY_BUTTON_CLICK = "설문참여 버튼 클릭 실패"
 
 class SurveyModule(BaseModule):
+    _is_running = False  # 정적 변수로 실행 중 여부 관리
+    _lock = threading.Lock()
+
     def __init__(self, web_automation, gui_logger=None):
         super().__init__(web_automation, gui_logger)
         self.problem_manager = SurveyProblemManager()
     
     def execute(self):
         """설문참여 페이지로 이동하고 첫 번째 세미나 자동 선택"""
+        original_window = None
         try:
+            # 중복 실행 방지
+            with SurveyModule._lock:
+                if SurveyModule._is_running:
+                    if self.gui_logger:
+                        self.log_info("ℹ 이미 설문 참여가 진행 중입니다. 중복 방지를 위해 취소합니다.")
+                    return False
+                SurveyModule._is_running = True
+
             if not self.web_automation or not self.web_automation.driver:
                 if self.gui_logger:
                     self.log_info("웹드라이버가 초기화되지 않았습니다. 먼저 로그인해주세요.")
+                SurveyModule._is_running = False
                 return False
+            
+            original_window = self.web_automation.driver.current_window_handle
             
             if self.gui_logger:
                 self.log_info("설문참여 페이지로 이동합니다...")
@@ -123,20 +140,46 @@ class SurveyModule(BaseModule):
                                 # 두 번째 세미나에서도 재입장 버튼 확인
                                 if not self.auto_click_reenter_button():
                                     if self.gui_logger:
-                                        self.gui_logger("두 번째 세미나에도 재입장 버튼이 없습니다. 포인트 확인을 진행합니다...")
-                                    self._run_points_check_module()
+                                        self.gui_logger("두 번째 세미나에도 재입장 버튼이 없습니다.")
                             else:
                                 if self.gui_logger:
-                                    self.gui_logger("두 번째 세미나가 없습니다. 포인트 확인을 진행합니다...")
-                                self._run_points_check_module()
+                                    self.gui_logger("두 번째 세미나가 없습니다.")
                         else:
                             if self.gui_logger:
-                                self.gui_logger("두 번째 세미나가 없습니다. 포인트 확인을 진행합니다...")
-                            self._run_points_check_module()
+                                self.gui_logger("두 번째 세미나가 없습니다.")
                     
                 except Exception as e:
                     if self.gui_logger:
                         self.gui_logger(f"❌ {ERROR_FIRST_SEMINAR_SELECTION}: {str(e)}")
+                finally:
+                    if original_window and self.web_automation and self.web_automation.driver:
+                        try:
+                            if self.gui_logger:
+                                self.log_info("설문참여 완료 후 추가 창을 정리합니다...")
+                            self.web_automation.close_other_windows(original_window)
+                        except Exception as e:
+                            if self.gui_logger:
+                                self.log_info(f"창 정리 중 오류: {str(e)}")
+                        finally:
+                            # 추가 창 정리 후 가장 마지막에, 기본 창에서 단위 작업 종료 시 포인트 확인 실행
+                            if self.gui_logger:
+                                self.log_info("모든 창 정리 완료, 포인트 확인을 진행합니다...")
+                            self._run_points_check_module()
+                            
+                            # 🔥 임시 스크린샷 파일 삭제
+                            try:
+                                temp_img = os.path.join(os.getcwd(), "survey_quiz_temp.png")
+                                if os.path.exists(temp_img):
+                                    # 약간 대기 후 삭제 (이미지 뷰어가 파일을 물고 있을 수 있음)
+                                    time.sleep(2)
+                                    os.remove(temp_img)
+                                    if self.gui_logger:
+                                        self.log_info("🧹 임시 스크린샷 파일을 삭제했습니다.")
+                            except:
+                                pass
+                            finally:
+                                # 실행 종료 표시
+                                SurveyModule._is_running = False
             
             # 백그라운드에서 실행
             threading.Thread(target=auto_click_seminar, daemon=True).start()
@@ -200,7 +243,6 @@ class SurveyModule(BaseModule):
                 self.log_info("새로운 팝업 창 대기 중...")
             
             # 새로운 팝업 창이 열릴 때까지 대기
-            import time
             time.sleep(2)  # 팝업 창 로딩 대기
             
             # 현재 열려있는 모든 창 핸들 가져오기
@@ -345,7 +387,6 @@ class SurveyModule(BaseModule):
                 self.log_info("새로운 설문 창 대기 중...")
             
             # 새로운 설문 창이 열릴 때까지 대기
-            import time
             time.sleep(3)  # 설문 창 로딩 대기 (1초 → 3초로 증가)
             
             # 현재 열려있는 모든 창 핸들 가져오기
@@ -486,8 +527,7 @@ class SurveyModule(BaseModule):
             # 원래 창으로 돌아가기
             self.web_automation.driver.switch_to.window(original_window)
             
-            # 설문 완료 후 포인트 확인 모듈 실행
-            self._run_points_check_module()
+            # 포인트 확인 모듈 실행은 상위로직(execute의 finally)에서 일괄 처리합니다.
             
             return True
             
@@ -802,6 +842,12 @@ class SurveyModule(BaseModule):
             processed_count = 0
             
             for question in questions:
+                # 세션 유효성 확인
+                try:
+                    _ = self.web_automation.driver.title
+                except:
+                    return False
+
                 try:
                     question_number = question.get_attribute('data-question-number')
                     if not question_number:
@@ -860,12 +906,26 @@ class SurveyModule(BaseModule):
                                     if hasattr(gui, 'root') and hasattr(gui, 'open_survey_problem'):
                                         if self.gui_logger:
                                             self.gui_logger(f"⚠️ 문제 {question_number}번: 정답 미등록. 설문 문제 자동 관리 창을 엽니다.")
+
+                                        # 스크린샷 캡처 (특히 헤드리스 모드에서 유용)
+                                        screenshot_path = os.path.join(os.getcwd(), "survey_quiz_temp.png")
+                                        try:
+                                            # 🔥 해당 문제를 화면 중앙으로 스크롤하여 캡처
+                                            self.web_automation.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", question)
+                                            time.sleep(0.5)  # 스크롤 후 안정화 대기
+                                            
+                                            self.web_automation.driver.save_screenshot(screenshot_path)
+                                            if self.gui_logger:
+                                                self.gui_logger(f"📸 {question_number}번 문제 위치로 스크롤하여 캡처했습니다.")
+                                        except Exception as e:
+                                            if self.gui_logger:
+                                                self.gui_logger(f"⚠️ 스크린샷 캡처 실패: {str(e)}")
+                                            screenshot_path = None
                                         
                                         # 카테고리 추출 (페이지 타이틀에서)
                                         category = ""
                                         try:
                                             title_text = self.web_automation.driver.title
-                                            import re
                                             matches = re.findall(r'\(([^)]+)\)', title_text)
                                             if matches:
                                                 last_paren = matches[-1]
@@ -881,22 +941,26 @@ class SurveyModule(BaseModule):
                                                 display_question = cleaned_line
                                                 break
                                         
-                                        import re
                                         # "1. " 같은 말머리 번호 제거
                                         display_question = re.sub(r'^\d+\.\s*', '', display_question)
                                         # [퀴즈] 태그 및 불필요한 별표(*) 제거
                                         display_question = display_question.replace('[퀴즈]', '').replace('*', '').strip()
                                             
-                                        # 람다 함수로 인수 전달 (tkinter after 메서드 사용 시)
-                                        gui.root.after(0, lambda q=display_question, c=category: gui.open_survey_problem(initial_question=q, initial_category=c))
+                                        # 람다 함수로 인수 전달 (이미지 경로 포함)
+                                        gui.root.after(0, lambda q=display_question, c=category, img=screenshot_path: gui.open_survey_problem(initial_question=q, initial_category=c, image_path=img))
                                         
                                         # 정답이 새로 등록될 때까지 대기
                                         if self.gui_logger:
                                             self.gui_logger(f"⌛ 문제 {question_number}번 정답이 등록될 때까지 대기합니다...")
                                         
                                         waiting_count = 0
-                                        import time
                                         while True:
+                                            # 세션 유효성 확인
+                                            try:
+                                                _ = self.web_automation.driver.title
+                                            except:
+                                                return False
+
                                             time.sleep(1.0)
                                             waiting_count += 1
                                             
@@ -1046,17 +1110,6 @@ class SurveyModule(BaseModule):
             return False
     
     def _normalize_question_text(self, question: str) -> str:
-        """
-        문제 제목을 정규화합니다.
-        [퀴즈] 태그와 후행 특수문자(*, ?, 등)를 제거합니다.
-        
-        Args:
-            question: 원본 문제 텍스트
-        
-        Returns:
-            정규화된 문제 텍스트
-        """
-        import re
         
         # [퀴즈] 태그 제거
         cleaned = question.replace("[퀴즈]", "").strip()

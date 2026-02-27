@@ -130,13 +130,20 @@ class DoctorBillAutomation:
         # 기본 설정값 정의
         self.default_settings = {
             'auto_attendance': True,             # 자동 출석체크
-            'auto_quiz': True,                   # 자동 문제풀기
-            'auto_seminar_check': True,          # 자동 라이브세미나 현황 열기
+            'auto_attendance_hour': 9,           # 자동 출석체크 시간 (시)
+            'auto_attendance_min': 0,            # 자동 출석체크 시간 (분)
+            'auto_quiz': True,                   # 자동 퀴즈풀기
+            'auto_quiz_hour': 9,                 # 자동 퀴즈풀기 시간 (시)
+            'auto_quiz_min': 5,                  # 자동 퀴즈풀기 시간 (분)
             'auto_survey': True,                 # 자동 설문참여
+            'auto_seminar_refresh': True,         # 자동 세미나 새로고침
             'auto_seminar_join': False,           # 자동 세미나 신청
             'auto_seminar_enter': False,          # 자동 세미나 입장
             'seminar_enter_delay': 5,             # 세미나 입장 대기시간 (분)
-            'seminar_refresh_interval': 5         # 세미나 새로고침 간격 (초)
+            'seminar_refresh_interval': 5,         # 세미나 새로고침 간격 (초)
+            'browser_headless': True,              # 크롬 창 숨기기 (Headless)
+            'settings_window_width': 520,          # 설정 창 가로 크기
+            'settings_window_height': 850          # 설정 창 세로 크기
         }
         
         # 설정 로드
@@ -160,8 +167,16 @@ class DoctorBillAutomation:
         # 모듈 초기화
         self.initialize_modules()
         
+        # 스케줄러 실행 정보
+        self._last_auto_attendance_date = None
+        self._last_auto_quiz_date = None
+        self._startup_time = datetime.now()
+        
         # 프로그램 시작 시 자동 로그인 실행
         self.root.after(200, self.auto_login)
+        
+        # 스케줄 작업 체크 시작 (5초마다 확인으로 정밀도 향상)
+        self.root.after(5000, self._check_scheduled_tasks)
     
     def setup_gui(self):
         """GUI 구성"""
@@ -879,7 +894,7 @@ class DoctorBillAutomation:
     #     self.update_display('quiz', status)
     
     def open_settings(self):
-        """설정 창을 엽니다."""
+        """설정 창을 엽니다 (스크롤 기능 및 크기 조절 추가)."""
         try:
             # 기존 설정 창이 열려있으면 닫기
             if hasattr(self, 'settings_window') and self.settings_window:
@@ -889,52 +904,46 @@ class DoctorBillAutomation:
             # 설정 창 생성
             self.settings_window = tk.Toplevel(self.root)
             self.settings_window.title("⚙️ 설정")
-            self.settings_window.geometry("500x600")
+            
+            # 저장된 창 크기 불러오기
+            width = self.get_setting('settings_window_width')
+            height = self.get_setting('settings_window_height')
+            self.settings_window.geometry(f"{width}x{height}")
+            
             self.settings_window.configure(bg='#f0f0f0')
-            self.settings_window.resizable(False, False)
+            self.settings_window.resizable(True, True)  # 크기 조절 허용
             self.settings_window.transient(self.root)
             self.settings_window.grab_set()
             
-            # 메인 프레임
-            main_frame = tk.Frame(self.settings_window, bg='#f0f0f0')
-            main_frame.pack(expand=True, fill='both', padx=20, pady=20)
+            # 1. 하단 버튼 프레임 (고정되어 스크롤되지 않음)
+            bottom_frame = tk.Frame(self.settings_window, bg='#ffffff', pady=15, padx=20, relief='raised', borderwidth=1)
+            bottom_frame.pack(side='bottom', fill='x')
             
-            # 제목
-            title_label = tk.Label(
-                main_frame,
-                text="⚙️ 프로그램 설정",
-                font=("맑은 고딕", 18, "bold"),
-                bg='#f0f0f0',
-                fg='#2c3e50'
-            )
-            title_label.pack(pady=(0, 20))
-            
-            # 설정 옵션들 (스크롤 없이)
-            self.setup_settings_options(main_frame)
-            
-            # 버튼 프레임 (하단 중앙 정렬)
-            button_frame = tk.Frame(main_frame, bg='#f0f0f0')
-            button_frame.pack(fill='x', pady=(30, 0))
+            # 버튼 컨테이너 (중앙 정렬용)
+            btn_container = tk.Frame(bottom_frame, bg='#ffffff')
+            btn_container.pack()
             
             # 저장 버튼
             save_button = tk.Button(
-                button_frame,
-                text="💾 저장",
+                btn_container,
+                text="💾 설정 저장",
                 font=("맑은 고딕", 12, "bold"),
                 bg='#27ae60',
                 fg='white',
                 activebackground='#229954',
                 activeforeground='white',
                 borderwidth=0,
+                padx=20,
+                pady=8,
                 relief='flat',
                 cursor='hand2',
                 command=self.save_settings_from_ui
             )
-            save_button.pack(side='left', padx=(0, 10))
+            save_button.pack(side='left', padx=10)
             
             # 닫기 버튼
             close_button = tk.Button(
-                button_frame,
+                btn_container,
                 text="❌ 닫기",
                 font=("맑은 고딕", 12, "bold"),
                 bg='#e74c3c',
@@ -942,14 +951,68 @@ class DoctorBillAutomation:
                 activebackground='#c0392b',
                 activeforeground='white',
                 borderwidth=0,
+                padx=20,
+                pady=8,
                 relief='flat',
                 cursor='hand2',
                 command=self.close_settings_window
             )
-            close_button.pack(side='left')
+            close_button.pack(side='left', padx=10)
             
-            # X 버튼 클릭 시 close_settings_window 함수 호출
-            self.settings_window.protocol("WM_DELETE_WINDOW", self.close_settings_window)
+            # 2. 스크롤 가능한 영역 (Canvas + Scrollbar)
+            container = tk.Frame(self.settings_window, bg='#f0f0f0')
+            container.pack(side='top', fill='both', expand=True)
+            
+            canvas = tk.Canvas(container, bg='#f0f0f0', highlightthickness=0)
+            scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+            
+            # 실제로 설정 내용이 들어갈 프레임
+            scrollable_frame = tk.Frame(canvas, bg='#f0f0f0')
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            # 캔버스에 프레임 배치
+            canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            
+            # 캔버스 크기 변경 시 내용 프레임 너비 조절
+            def _configure_canvas(event):
+                canvas.itemconfig(canvas_frame, width=event.width)
+            canvas.bind("<Configure>", _configure_canvas)
+            
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # 마우스 휠 이벤트 바인딩
+            def _on_mousewheel(event):
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            
+            canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=20)
+            scrollbar.pack(side="right", fill="y", pady=20)
+            
+            # 3. 설정 내용 채우기
+            # 제목
+            title_label = tk.Label(
+                scrollable_frame,
+                text="⚙️ 프로그램 설정",
+                font=("맑은 고딕", 18, "bold"),
+                bg='#f0f0f0',
+                fg='#2c3e50'
+            )
+            title_label.pack(pady=(0, 20))
+            
+            # 설정 옵션들 호출
+            self.setup_settings_options(scrollable_frame)
+            
+            # 창이 닫힐 때 마우스 휠 바인딩 해제
+            def _on_closing():
+                canvas.unbind_all("<MouseWheel>")
+                self.close_settings_window()
+            
+            self.settings_window.protocol("WM_DELETE_WINDOW", _on_closing)
             
         except Exception as e:
             self.handle_error('gui', f"설정 창 열기 실패: {str(e)}")
@@ -969,9 +1032,9 @@ class DoctorBillAutomation:
             bg='#f0f0f0',
             fg='#2c3e50',
             padx=10,
-            pady=10
+            pady=5
         )
-        auto_frame.pack(fill='x', pady=(0, 15))
+        auto_frame.pack(fill='x', pady=(0, 10))
         
         # 자동 출석체크
         self.setting_vars['auto_attendance'] = tk.BooleanVar(value=self.get_setting('auto_attendance'))
@@ -985,13 +1048,56 @@ class DoctorBillAutomation:
             activebackground='#f0f0f0',
             activeforeground='#2c3e50'
         )
-        attendance_check.pack(anchor='w', pady=2)
+        attendance_check.pack(anchor='w', pady=(2, 0))
         
-        # 자동 문제풀기
+        # 출석체크 시간 설정
+        attendance_time_frame = tk.Frame(auto_frame, bg='#f0f0f0')
+        attendance_time_frame.pack(anchor='w', pady=(0, 5), padx=25)
+        
+        attendance_widgets = []
+        def _on_attendance_toggle():
+            state = 'normal' if self.setting_vars['auto_attendance'].get() else 'disabled'
+            for w in attendance_widgets:
+                try: w.configure(state=state)
+                except: pass
+        
+        lbl_time = tk.Label(attendance_time_frame, text="⏰ 실행 시간:", font=("맑은 고딕", 10), bg='#f0f0f0', fg='#2c3e50')
+        lbl_time.pack(side='left')
+        attendance_widgets.append(lbl_time)
+        
+        attendance_check.configure(command=_on_attendance_toggle)
+        
+        self.setting_vars['auto_attendance_hour'] = tk.StringVar(value=str(self.get_setting('auto_attendance_hour')))
+        hour_spin = tk.Spinbox(attendance_time_frame, from_=0, to=23, textvariable=self.setting_vars['auto_attendance_hour'], width=3, font=("맑은 고딕", 10, "bold"), justify='center')
+        hour_spin.pack(side='left', padx=2)
+        attendance_widgets.append(hour_spin)
+        
+        lbl_hour = tk.Label(attendance_time_frame, text="시", font=("맑은 고딕", 10), bg='#f0f0f0', fg='#2c3e50')
+        lbl_hour.pack(side='left')
+        attendance_widgets.append(lbl_hour)
+        
+        self.setting_vars['auto_attendance_min'] = tk.StringVar(value=str(self.get_setting('auto_attendance_min')))
+        min_spin = tk.Spinbox(attendance_time_frame, from_=0, to=59, textvariable=self.setting_vars['auto_attendance_min'], width=3, font=("맑은 고딕", 10, "bold"), justify='center')
+        min_spin.pack(side='left', padx=2)
+        attendance_widgets.append(min_spin)
+        
+        lbl_min = tk.Label(attendance_time_frame, text="분", font=("맑은 고딕", 10), bg='#f0f0f0', fg='#2c3e50')
+        lbl_min.pack(side='left')
+        attendance_widgets.append(lbl_min)
+        
+        tk.Label(
+            auto_frame,
+            text="  └ 지정한 시간에 오늘의 출석체크를 자동으로 진행합니다.",
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#7f8c8d'
+        ).pack(anchor='w', pady=(0, 5), padx=25)
+        
+        # 자동 퀴즈풀기
         self.setting_vars['auto_quiz'] = tk.BooleanVar(value=self.get_setting('auto_quiz'))
         quiz_check = tk.Checkbutton(
             auto_frame,
-            text="🧠 자동 문제풀기",
+            text="🧠 자동 퀴즈풀기",
             variable=self.setting_vars['auto_quiz'],
             font=("맑은 고딕", 11),
             bg='#f0f0f0',
@@ -999,49 +1105,50 @@ class DoctorBillAutomation:
             activebackground='#f0f0f0',
             activeforeground='#2c3e50'
         )
-        quiz_check.pack(anchor='w', pady=2)
+        quiz_check.pack(anchor='w', pady=(2, 0))
         
-        # 자동 라이브세미나 현황 열기
-        self.setting_vars['auto_seminar_check'] = tk.BooleanVar(value=self.get_setting('auto_seminar_check'))
-        seminar_check = tk.Checkbutton(
-            auto_frame,
-            text="📺 자동 라이브세미나 현황 열기",
-            variable=self.setting_vars['auto_seminar_check'],
-            font=("맑은 고딕", 11),
-            bg='#f0f0f0',
-            fg='#2c3e50',
-            activebackground='#f0f0f0',
-            activeforeground='#2c3e50'
-        )
-        seminar_check.pack(anchor='w', pady=2)
+        # 퀴즈풀기 시간 설정
+        quiz_time_frame = tk.Frame(auto_frame, bg='#f0f0f0')
+        quiz_time_frame.pack(anchor='w', pady=(0, 5), padx=25)
         
-        # 자동 설문참여
-        self.setting_vars['auto_survey'] = tk.BooleanVar(value=self.get_setting('auto_survey'))
-        survey_check = tk.Checkbutton(
-            auto_frame,
-            text="📋 자동 설문참여",
-            variable=self.setting_vars['auto_survey'],
-            font=("맑은 고딕", 11),
-            bg='#f0f0f0',
-            fg='#2c3e50',
-            activebackground='#f0f0f0',
-            activeforeground='#2c3e50'
-        )
-        survey_check.pack(anchor='w', pady=2)
+        quiz_widgets = []
+        def _on_quiz_toggle():
+            state = 'normal' if self.setting_vars['auto_quiz'].get() else 'disabled'
+            for w in quiz_widgets:
+                try: w.configure(state=state)
+                except: pass
         
-        # 자동 세미나 신청
-        self.setting_vars['auto_seminar_join'] = tk.BooleanVar(value=self.get_setting('auto_seminar_join'))
-        seminar_join_check = tk.Checkbutton(
+        lbl_q_time = tk.Label(quiz_time_frame, text="⏰ 실행 시간:", font=("맑은 고딕", 10), bg='#f0f0f0', fg='#2c3e50')
+        lbl_q_time.pack(side='left')
+        quiz_widgets.append(lbl_q_time)
+        
+        quiz_check.configure(command=_on_quiz_toggle)
+        
+        self.setting_vars['auto_quiz_hour'] = tk.StringVar(value=str(self.get_setting('auto_quiz_hour')))
+        q_hour_spin = tk.Spinbox(quiz_time_frame, from_=0, to=23, textvariable=self.setting_vars['auto_quiz_hour'], width=3, font=("맑은 고딕", 10, "bold"), justify='center')
+        q_hour_spin.pack(side='left', padx=2)
+        quiz_widgets.append(q_hour_spin)
+        
+        lbl_q_hour = tk.Label(quiz_time_frame, text="시", font=("맑은 고딕", 10), bg='#f0f0f0', fg='#2c3e50')
+        lbl_q_hour.pack(side='left')
+        quiz_widgets.append(lbl_q_hour)
+        
+        self.setting_vars['auto_quiz_min'] = tk.StringVar(value=str(self.get_setting('auto_quiz_min')))
+        q_min_spin = tk.Spinbox(quiz_time_frame, from_=0, to=59, textvariable=self.setting_vars['auto_quiz_min'], width=3, font=("맑은 고딕", 10, "bold"), justify='center')
+        q_min_spin.pack(side='left', padx=2)
+        quiz_widgets.append(q_min_spin)
+        
+        lbl_q_min = tk.Label(quiz_time_frame, text="분", font=("맑은 고딕", 10), bg='#f0f0f0', fg='#2c3e50')
+        lbl_q_min.pack(side='left')
+        quiz_widgets.append(lbl_q_min)
+
+        tk.Label(
             auto_frame,
-            text="📝 자동 세미나 신청",
-            variable=self.setting_vars['auto_seminar_join'],
-            font=("맑은 고딕", 11),
+            text="  └ 지정한 시간에 미완료된 수강 퀴즈를 자동으로 풀이합니다.",
+            font=("맑은 고딕", 9),
             bg='#f0f0f0',
-            fg='#2c3e50',
-            activebackground='#f0f0f0',
-            activeforeground='#2c3e50'
-        )
-        seminar_join_check.pack(anchor='w', pady=2)
+            fg='#7f8c8d'
+        ).pack(anchor='w', pady=(0, 5), padx=25)
         
         # 자동 세미나 입장하기
         self.setting_vars['auto_seminar_enter'] = tk.BooleanVar(value=self.get_setting('auto_seminar_enter'))
@@ -1055,21 +1162,40 @@ class DoctorBillAutomation:
             activebackground='#f0f0f0',
             activeforeground='#2c3e50'
         )
-        seminar_enter_check.pack(anchor='w', pady=2)
+        seminar_enter_check.pack(anchor='w', pady=(2, 0))
+        
+        tk.Label(
+            auto_frame,
+            text="  └ 세미나 시작 시간 부근에 자동으로 시청 페이지에 입장합니다.",
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#7f8c8d'
+        ).pack(anchor='w', pady=(0, 2), padx=25)
         
         # 세미나 입장 대기시간 설정
         enter_delay_frame = tk.Frame(auto_frame, bg='#f0f0f0')
         enter_delay_frame.pack(anchor='w', pady=(5, 10), padx=25)
         
-        tk.Label(
+        enter_widgets = []
+        def _on_enter_toggle():
+            state = 'normal' if self.setting_vars['auto_seminar_enter'].get() else 'disabled'
+            for w in enter_widgets:
+                try: w.configure(state=state)
+                except: pass
+        
+        seminar_enter_check.configure(command=_on_enter_toggle)
+        
+        lbl_delay = tk.Label(
             enter_delay_frame,
             text="⏳ 입장 대기시간: 시작시간 +",
             font=("맑은 고딕", 10),
             bg='#f0f0f0',
             fg='#2c3e50'
-        ).pack(side='left')
+        )
+        lbl_delay.pack(side='left')
+        enter_widgets.append(lbl_delay)
         
-        self.setting_vars['seminar_enter_delay'] = tk.IntVar(value=self.get_setting('seminar_enter_delay'))
+        self.setting_vars['seminar_enter_delay'] = tk.StringVar(value=str(self.get_setting('seminar_enter_delay')))
         enter_delay_spinbox = tk.Spinbox(
             enter_delay_frame,
             from_=0,
@@ -1080,46 +1206,187 @@ class DoctorBillAutomation:
             justify='center'
         )
         enter_delay_spinbox.pack(side='left', padx=5)
+        enter_widgets.append(enter_delay_spinbox)
         
-        tk.Label(
+        lbl_delay_unit = tk.Label(
             enter_delay_frame,
             text="분 후 자동 입장",
             font=("맑은 고딕", 10),
             bg='#f0f0f0',
             fg='#7f8c8d'
-        ).pack(side='left')
+        )
+        lbl_delay_unit.pack(side='left')
+        enter_widgets.append(lbl_delay_unit)
         
-        # 세미나 새로고침 간격 설정
-        interval_frame = tk.Frame(auto_frame, bg='#f0f0f0')
-        interval_frame.pack(anchor='w', pady=10, padx=5)
+        # 자동 세미나 새로고침
+        self.setting_vars['auto_seminar_refresh'] = tk.BooleanVar(value=self.get_setting('auto_seminar_refresh'))
         
-        tk.Label(
-            interval_frame,
-            text="⏱ 세미나 새로고침 간격:",
+        # 하위 위젯들을 제어하기 위한 리스트
+        self._seminar_sub_widgets = []
+        
+        def _on_refresh_toggle():
+            is_enabled = self.setting_vars['auto_seminar_refresh'].get()
+            state = 'normal' if is_enabled else 'disabled'
+            
+            # 하위 위젯들 상태 변경
+            for widget in self._seminar_sub_widgets:
+                try:
+                    widget.configure(state=state)
+                except:
+                    pass
+            
+            if not is_enabled:
+                # 새로고침이 꺼지면 자동 신청 및 자동 설문참여도 끔
+                self.setting_vars['auto_seminar_join'].set(False)
+                self.setting_vars['auto_survey'].set(False)
+        
+        refresh_check = tk.Checkbutton(
+            auto_frame,
+            text="🔄 자동 세미나 새로고침",
+            variable=self.setting_vars['auto_seminar_refresh'],
+            command=_on_refresh_toggle,
             font=("맑은 고딕", 11),
             bg='#f0f0f0',
-            fg='#2c3e50'
-        ).pack(side='left')
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        refresh_check.pack(anchor='w', pady=(5, 0))
         
-        self.setting_vars['seminar_refresh_interval'] = tk.IntVar(value=self.get_setting('seminar_refresh_interval'))
-        interval_spinbox = tk.Spinbox(
+        tk.Label(
+            auto_frame,
+            text="  └ 세미나 목록을 설정한 간격을 주기로 새로고침합니다",
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#7f8c8d'
+        ).pack(anchor='w', pady=(0, 2), padx=25)
+        
+        # 세미나 새로고침 간격 설정 (들여쓰기 적용)
+        interval_frame = tk.Frame(auto_frame, bg='#f0f0f0')
+        interval_frame.pack(anchor='w', pady=(2, 10), padx=25)
+        
+        refresh_label = tk.Label(
+            interval_frame,
+            text="⏱️ 세미나 새로고침 간격:",
+            font=("맑은 고딕", 10),
+            bg='#f0f0f0',
+            fg='#2c3e50'
+        )
+        refresh_label.pack(side='left')
+        self._seminar_sub_widgets.append(refresh_label)
+        
+        self.setting_vars['seminar_refresh_interval'] = tk.StringVar(value=str(self.get_setting('seminar_refresh_interval')))
+        interval_spin = tk.Spinbox(
             interval_frame,
             from_=1,
-            to=60,
+            to=3600,
             textvariable=self.setting_vars['seminar_refresh_interval'],
             width=5,
             font=("맑은 고딕", 10, "bold"),
             justify='center'
         )
-        interval_spinbox.pack(side='left', padx=10)
+        interval_spin.pack(side='left', padx=2)
+        self._seminar_sub_widgets.append(interval_spin)
         
-        tk.Label(
+        refresh_unit = tk.Label(
             interval_frame,
             text="초 (권장: 5초 이상)",
             font=("맑은 고딕", 10),
             bg='#f0f0f0',
             fg='#7f8c8d'
-        ).pack(side='left')
+        )
+        refresh_unit.pack(side='left')
+        self._seminar_sub_widgets.append(refresh_unit)
+
+        # 자동 세미나 신청 (새로고침 하위이지만 들여쓰기 없이 정렬)
+        self.setting_vars['auto_seminar_join'] = tk.BooleanVar(value=self.get_setting('auto_seminar_join'))
+        seminar_join_check = tk.Checkbutton(
+            auto_frame,
+            text="📝 자동 세미나 신청",
+            variable=self.setting_vars['auto_seminar_join'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        seminar_join_check.pack(anchor='w', pady=(2, 0))
+        self._seminar_sub_widgets.append(seminar_join_check)
+        
+        tk.Label(
+            auto_frame,
+            text="  └ 발견된 새로운 세미나를 자동으로 신청합니다.\n  └ 자동 세미나 새로고침 간격에 따릅니다 (활성화 필요)",
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#7f8c8d',
+            justify='left'
+        ).pack(anchor='w', pady=(0, 5), padx=25)
+        
+        # 자동 설문참여
+        self.setting_vars['auto_survey'] = tk.BooleanVar(value=self.get_setting('auto_survey'))
+        survey_check = tk.Checkbutton(
+            auto_frame,
+            text="📋 자동 설문참여",
+            variable=self.setting_vars['auto_survey'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        survey_check.pack(anchor='w', pady=(2, 0))
+        self._seminar_sub_widgets.append(survey_check)
+        
+        tk.Label(
+            auto_frame,
+            text="  └ 강의 종료 후 출력되는 설문조사에 자동으로 응답합니다.\n  └ 자동 세미나 새로고침 간격에 따릅니다 (활성화 필요)",
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#7f8c8d',
+            justify='left'
+        ).pack(anchor='w', pady=(0, 5), padx=25)
+        
+        # 초기 상태 설정을 위해 호출
+        _on_attendance_toggle()
+        _on_quiz_toggle()
+        _on_enter_toggle()
+        _on_refresh_toggle()
+
+        # 브라우저 설정 섹션
+        browser_frame = tk.LabelFrame(
+            parent,
+            text="🌐 브라우저 설정",
+            font=("맑은 고딕", 12, "bold"),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            padx=10,
+            pady=5
+        )
+        browser_frame.pack(fill='x', pady=(0, 10))
+
+        # 크롬 창 숨기기
+        self.setting_vars['browser_headless'] = tk.BooleanVar(value=self.get_setting('browser_headless'))
+        headless_check = tk.Checkbutton(
+            browser_frame,
+            text="🛡️ 크롬 창 숨기기 (백그라운드 실행)",
+            variable=self.setting_vars['browser_headless'],
+            font=("맑은 고딕", 11),
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            activebackground='#f0f0f0',
+            activeforeground='#2c3e50'
+        )
+        headless_check.pack(anchor='w', pady=(2, 0))
+        
+        tk.Label(
+            browser_frame,
+            text="  └ 브라우저 화면을 숨기고 백그라운드에서 조용히 실행합니다.",
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#7f8c8d'
+        ).pack(anchor='w', pady=(0, 5), padx=25)
+        
+        ToolTip(headless_check, "크롬 창을 띄우지 않고 백그라운드에서 작업을 수행합니다.\n체크하면 작업 중 컴퓨터 사용이 더 편리해집니다.", delay=500)
         
         
         # 설명 텍스트
@@ -1135,27 +1402,80 @@ class DoctorBillAutomation:
             wrap='word'
         )
         info_text.pack(fill='x', pady=(0, 10))
-        info_text.insert('1.0', "💡 설정 안내:\n• 자동 실행 설정은 프로그램 시작 시에만 적용됩니다.")
+        info_text.insert('1.0', "💡 설정 안내:\n• 자동 실행 설정은 프로그램 시작 시에만 적용됩니다.\n• 브라우저 설정 변경 시 브라우저가 재시작됩니다.")
         info_text.config(state='disabled')
     
     def save_settings_from_ui(self):
         """UI에서 설정값을 저장합니다."""
         try:
-            # UI의 체크박스 값들을 설정에 반영
+            # 변경 전 설정값 저장
+            old_headless = self.get_setting('browser_headless')
+            
+            # UI의 체크박스 값들을 설정에 반영 (숫자 항목은 안전하게 변환)
             for key, var in self.setting_vars.items():
-                self.set_setting(key, var.get())
+                val = var.get()
+                # 08, 09 등 8진수 오인 방지를 위해 문자열인 경우 int로 강제 변환 시도
+                if isinstance(val, str) and val.isdigit():
+                    try:
+                        self.set_setting(key, int(val, 10))
+                    except:
+                        self.set_setting(key, val)
+                else:
+                    self.set_setting(key, val)
+            
+            # 헤드리스 설정이 변경되었는지 확인
+            new_headless = self.get_setting('browser_headless')
             
             self.log_success("설정이 저장되었습니다.")
-            messagebox.showinfo("설정 저장", "설정이 성공적으로 저장되었습니다!")
             
+            # 헤드리스 설정이 바뀌었으면 브라우저 재시작 여부 확인
+            if old_headless != new_headless:
+                if messagebox.askyesno("브라우저 설정 변경", "브라우저 설정(창 숨기기)이 변경되었습니다.\n변경사항을 적용하기 위해 지금 브라우저를 재시작하시겠습니까?"):
+                    self.restart_browser()
+            else:
+                messagebox.showinfo("설정 저장", "설정이 성공적으로 저장되었습니다!")
+            
+            # 설정 저장 후 설정 창 자동으로 닫기
+            self.close_settings_window()
+                
         except Exception as e:
             self.handle_error('gui', f"설정 저장 실패: {str(e)}")
             messagebox.showerror("오류", f"설정 저장에 실패했습니다: {str(e)}")
+
+    def restart_browser(self):
+        """브라우저를 재시작하고 자동 로그인을 다시 시도합니다."""
+        try:
+            self.log_message("브라우저 설정을 적용하기 위해 재시작을 시작합니다...")
+            
+            # 1. 기존 브라우저 정리
+            self.task_manager.cleanup_web_automation()
+            
+            # 2. 조금 대기 (프로세스 완전 종료 대기)
+            time.sleep(1)
+            
+            # 3. 자동 로그인 다시 실행 (새로운 설정 적용됨)
+            self.auto_login()
+            
+            self.log_success("브라우저 재시작 및 자동 로그인이 시작되었습니다.")
+            
+        except Exception as e:
+            self.handle_error('gui', f"브라우저 재시작 실패: {str(e)}")
+            messagebox.showerror("오류", f"브라우저 재시작에 실패했습니다: {str(e)}")
     
     def close_settings_window(self):
-        """설정 창을 닫습니다."""
+        """설정 창을 닫습니다 (창 크기 저장)."""
         try:
             if hasattr(self, 'settings_window') and self.settings_window:
+                # 닫기 전 현재 창 크기 저장
+                width = self.settings_window.winfo_width()
+                height = self.settings_window.winfo_height()
+                
+                # 비정상적으로 작은 크기(최소화 등)가 아닐 때만 저장
+                if width > 100 and height > 100:
+                    self.set_setting('settings_window_width', width)
+                    self.set_setting('settings_window_height', height)
+                    self.save_settings() # 즉시 파일 저장
+                
                 self.settings_window.destroy()
                 delattr(self, 'settings_window')
         except Exception as e:
@@ -1229,31 +1549,16 @@ class DoctorBillAutomation:
         try:
             gui_callbacks = self.get_callbacks()
             
-            # 1. 세미나 정보 수집 (항상 실행)
-            self.log_message("세미나 정보를 수집합니다...")
-            self.update_status("세미나 정보 수집 중...")
-            self._collect_seminar_info_for_main_gui()
+            # 1. 세미나 정보 수집 (자동 새로고침이 꺼져있을 때만 수동 실행)
+            if not self.get_setting('auto_seminar_refresh'):
+                self.log_message("세미나 정보를 수집합니다...")
+                self.update_status("세미나 정보 수집 중...")
+                self._collect_seminar_info_for_main_gui()
+            else:
+                self.log_message("자동 새로고침이 활성화되어 있어 초기 수집을 건너뜁니다.")
             
-            # 2. 자동 출석체크
-            if self.get_setting('auto_attendance'):
-                self.log_message("자동 출석체크를 시작합니다...")
-                self.update_status("자동 출석체크 중...")
-                self.task_manager.execute_attendance(gui_callbacks)
-                time.sleep(2)  # 작업 간 대기
-            
-            # 3. 자동 문제풀기
-            if self.get_setting('auto_quiz'):
-                self.log_message("자동 문제풀기를 시작합니다...")
-                self.update_status("자동 문제풀기 중...")
-                self.task_manager.execute_quiz(gui_callbacks)
-                time.sleep(2)  # 작업 간 대기
-            
-            # 4. 자동 라이브세미나 현황 열기
-            if self.get_setting('auto_seminar_check'):
-                self.log_message("자동 라이브세미나 현황을 확인합니다...")
-                self.update_status("라이브세미나 현황 확인 중...")
-                self.task_manager.execute_seminar(gui_callbacks)
-                time.sleep(2)  # 작업 간 대기
+            # 2/3. 자동 출석체크 & 퀴즈풀기는 이제 스케줄러(._check_scheduled_tasks)에서 처리함
+            self.log_message("로그인 후 초기화가 완료되었습니다. 설정된 시간에 자동 작업이 실행됩니다.")
             
             # 5. 자동 설문참여는 강의 종료 감지 시 자동 실행됨 (새로고침 주기로 처리)
             
@@ -1262,10 +1567,68 @@ class DoctorBillAutomation:
             self.update_status("자동 작업 완료")
             
             # 세미나 자동 새로고침 시작
-            self.root.after(0, self._start_seminar_auto_refresh)
+            self._start_seminar_auto_refresh()
             
         except Exception as e:
-            self.handle_error('data', f"자동 작업 실행 중 오류: {str(e)}")
+            self.handle_error('data', f"자동 작업 실행 오류: {str(e)}")
+
+    def _check_scheduled_tasks(self):
+        """설정된 시간에 맞춰 자동 작업을 실행합니다."""
+        try:
+            # 브라우저가 준비되지 않았거나 다른 작업이 실행 중이면 건너뛰기
+            if self.task_manager.state.web_automation is None or self.task_manager.state.current_module is not None:
+                # 5초 후 다시 확인
+                self.root.after(5000, self._check_scheduled_tasks)
+                return
+
+            now = datetime.now()
+            today = now.date()
+            current_hour = now.hour
+            current_min = now.minute
+            
+            gui_callbacks = self.get_callbacks()
+            
+            # 1. 자동 출석체크 체크
+            if self.get_setting('auto_attendance') and self._last_auto_attendance_date != today:
+                sch_hour = self.get_setting('auto_attendance_hour')
+                sch_min = self.get_setting('auto_attendance_min')
+                
+                # 예약 시간 (오늘)
+                scheduled_time = now.replace(hour=sch_hour, minute=sch_min, second=0, microsecond=0)
+                
+                # 현재 시간이 예약 시간 이후이고, 프로그램 시작 시간 이후인 경우에만 실행
+                if now >= scheduled_time and scheduled_time >= self._startup_time:
+                    self.log_message(f"⏰ 예약된 자동 출석체크를 시작합니다. (설정시간: {sch_hour:02d}:{sch_min:02d})")
+                    self.update_status("자동 출석체크 중...")
+                    self.task_manager.execute_attendance(gui_callbacks)
+                    self._last_auto_attendance_date = today
+                    # 하나의 작업이 시작되면 다음 체크는 작업 완료 후를 위해 미룸
+                    self.root.after(10000, self._check_scheduled_tasks)
+                    return
+
+            # 2. 자동 퀴즈풀기 체크
+            if self.get_setting('auto_quiz') and self._last_auto_quiz_date != today:
+                sch_hour = self.get_setting('auto_quiz_hour')
+                sch_min = self.get_setting('auto_quiz_min')
+                
+                # 예약 시간 (오늘)
+                scheduled_time = now.replace(hour=sch_hour, minute=sch_min, second=0, microsecond=0)
+                
+                # 현재 시간이 예약 시간 이후이고, 프로그램 시작 시간 이후인 경우에만 실행
+                if now >= scheduled_time and scheduled_time >= self._startup_time:
+                    self.log_message(f"⏰ 예약된 자동 퀴즈풀기를 시작합니다. (설정시간: {sch_hour:02d}:{sch_min:02d})")
+                    self.update_status("자동 퀴즈풀기 중...")
+                    self.task_manager.execute_quiz(gui_callbacks)
+                    self._last_auto_quiz_date = today
+                    self.root.after(10000, self._check_scheduled_tasks)
+                    return
+            
+            # 실행할 작업이 없으면 5초 후 다시 확인
+            self.root.after(5000, self._check_scheduled_tasks)
+            
+        except Exception as e:
+            self.log_error(f"스케줄 작업 체크 중 오류: {str(e)}")
+            self.root.after(10000, self._check_scheduled_tasks)
     
     
     def _collect_seminar_info_for_main_gui(self):
@@ -1286,11 +1649,9 @@ class DoctorBillAutomation:
             
             if seminars:
                 self.log_message(f"세미나 정보 {len(seminars)}개 수집 완료!")
-                # 메인 GUI 트리뷰에 표시
                 self.update_today_seminars(seminars)
             else:
                 self.log_message("수집할 세미나 정보가 없습니다.")
-                # 빈 상태로 업데이트
                 self.update_today_seminars([])
                 
         except Exception as e:
@@ -1298,6 +1659,10 @@ class DoctorBillAutomation:
     
     def _start_seminar_auto_refresh(self):
         """세미나 자동 새로고침을 시작합니다."""
+        if not self.get_setting('auto_seminar_refresh'):
+            self.log_info("세미나 자동 새로고침이 비활성화되어 있습니다.")
+            return
+            
         interval = self.get_setting('seminar_refresh_interval')
         self.log_info(f"세미나 자동 새로고침이 시작되었습니다. ({interval}초 간격)")
         self._do_seminar_refresh()
@@ -1316,6 +1681,10 @@ class DoctorBillAutomation:
     def _do_seminar_refresh(self):
         """설정된 간격마다 세미나 정보를 새로고침합니다."""
         try:
+            # 설정이 꺼져 있으면 새로고침 중단
+            if not self.get_setting('auto_seminar_refresh'):
+                return
+                
             # 일시정지 상태면 건너뛰기
             if self._seminar_refresh_paused:
                 pass  # 조용히 건너뛰기
@@ -1333,10 +1702,15 @@ class DoctorBillAutomation:
                             if not self.task_manager.state.web_automation:
                                 return
                             seminar_module = SeminarModule(self.task_manager.state.web_automation, self.log_message)
-                            applied = seminar_module.auto_apply_available_seminars()
-                            # 신청 후 최신 정보로 트리뷰 갱신
-                            self._collect_seminar_info_for_main_gui()
-                            # 강의 종료 감지 후 자동 설문참여
+                            # 신청 결과와 함께 최신 세미나 목록도 반환받음
+                            applied_count, seminars = seminar_module.auto_apply_available_seminars()
+                            
+                            # 수집된 정보가 있으면 트리뷰 즉시 갱신 (추가 수집 불필요)
+                            if seminars:
+                                self.log_message(f"세미나 정보 {len(seminars)}개 자동 갱신 완료!")
+                                self.safe_gui_update(self.update_today_seminars, seminars)
+                            
+                            # 강의 종료 감지 후 자동 설문참여 (별도 스레드에서 필요한 정보만 수집)
                             self.root.after(0, self._check_and_run_auto_survey)
                             # 자동 세미나 입장 체크
                             if self.get_setting('auto_seminar_enter'):
@@ -1570,9 +1944,16 @@ class DoctorBillAutomation:
             self.handle_error('webpage', f"설문참여 페이지 이동 중 오류: {str(e)}")
             self.update_status("설문참여 페이지 오류")
     
-    def open_survey_problem(self, initial_question=None, initial_category=None):
+    def open_survey_problem(self, initial_question=None, initial_category=None, image_path=None):
         """설문 문제 관리 창 열기"""
         try:
+            # 스크린샷이 있으면 먼저 열어서 보여주기
+            if image_path and os.path.exists(image_path):
+                try:
+                    os.startfile(image_path)
+                except Exception as e:
+                    self.log_error(f"스크린샷 열기 실패: {str(e)}")
+            
             self.log_message("설문 문제 관리 창을 열고 있습니다...")
             open_survey_problem_manager(self.root, self.log_message, initial_question, initial_category)
             self.log_message("✅ 설문 문제 관리 창이 열렸습니다.")
@@ -1882,37 +2263,63 @@ class DoctorBillAutomation:
     
     
     def update_today_seminars(self, seminars_data):
-        """오늘의 세미나 정보를 트리뷰에 표시합니다."""
+        """오늘의 세미나 정보를 트리뷰에 표시합니다. (메인 스레드 실행 권장)"""
         try:
-            from datetime import datetime
-            
+            # GUI 업데이트는 메인 스레드에서 실행
+            if threading.current_thread() is not threading.main_thread():
+                self.root.after(0, lambda: self.update_today_seminars(seminars_data))
+                return
+
+            def normalize_date(date_str):
+                """날짜 형식을 비교 가능한 형태로 통일 (예: 2.26, 02.26, 2/26 -> 2.26)"""
+                if not date_str: return ""
+                # 요일 제거 (수) 등
+                clean = date_str.split('(')[0].strip()
+                # 구분자 통일 (. , /)
+                clean = clean.replace('/', '.').replace('-', '.')
+                # 월/일 추출 시도
+                parts = [p for p in clean.split('.') if p.strip()]
+                if len(parts) >= 2:
+                    # '22.02.26' 또는 '2022.02.26' 대응 (뒤에서 2개 사용)
+                    m = int(parts[-2])
+                    d = int(parts[-1])
+                    return f"{m}.{d}"
+                return clean
+
             # 기존 데이터 삭제
             for item in self.seminar_tree.get_children():
                 self.seminar_tree.delete(item)
             
             if not seminars_data:
-                # 세미나가 없는 경우 메시지 표시
                 self.seminar_tree.insert('', 'end', values=("", "", "", "오늘 예정된 세미나가 없습니다", "", "", ""))
+                return
+
+            today = datetime.now()
+            today_md = f"{today.month}/{today.day}"
+            today_norm = f"{today.month}.{today.day}"
+                
+            # 디버깅: 수집된 개수 및 날짜 확인
+            # self.log_message(f"DEBUG: PC Date={today_md}, Items={len(seminars_data)}")
+            
+            # 오늘 날짜만 필터링 (M/D 원본 매칭 우선, 그외 정규화 매칭)
+            today_seminars = []
+            for s in seminars_data:
+                raw_date = s.get('date', '').strip()
+                # 1. 원본 M/D 매칭 (예: "2/26")
+                if raw_date == today_md or raw_date.startswith(today_md + " "):
+                    today_seminars.append(s)
+                    continue
+                # 2. 정규화 매칭 (예: "2.26", "02.26" 등)
+                if normalize_date(raw_date) == today_norm:
+                    today_seminars.append(s)
+            
+            if today_seminars:
+                self.log_message(f"✅ 오늘 세미나 {len(today_seminars)}개 발견")
+                self._insert_seminar_data_to_main_tree(today_seminars)
             else:
-                # 오늘 날짜만 필터링 (세미나 날짜 형식에 맞춤)
-                today = datetime.now()
-                today_md = f"{today.month}/{today.day}"  # M/D 형식으로 변환
-                    
-                # 디버깅: 세미나 데이터의 날짜 형식 확인
-                self.log_message(f"오늘 날짜 (M/D 형식): {today_md}")
-                if seminars_data:
-                    sample_dates = [s.get('date', '') for s in seminars_data[:3]]
-                    self.log_message(f"세미나 날짜 샘플: {sample_dates}")
-                
-                today_seminars = [s for s in seminars_data if s.get('date', '') == today_md]
-                
-                if today_seminars:
-                    self.log_message(f"오늘 세미나 {len(today_seminars)}개 발견")
-                    # 오늘 세미나 데이터를 트리뷰에 삽입
-                    self._insert_seminar_data_to_main_tree(today_seminars)
-                else:
-                    self.log_message("오늘 예정된 세미나가 없습니다")
-                    self.seminar_tree.insert('', 'end', values=("", "", "", "오늘 예정된 세미나가 없습니다", "", "", ""))
+                raw_samples = [s.get('date', '') for s in seminars_data[:3]]
+                self.log_message(f"⚠ 오늘 일정 없음 (매칭기준: {today_md}, 수집샘플: {raw_samples})")
+                self.seminar_tree.insert('', 'end', values=("", "", "", "오늘 예정된 세미나가 없습니다", "", "", ""))
             
         except Exception as e:
             self.handle_error('data', f"세미나 정보 표시 중 오류: {str(e)}")

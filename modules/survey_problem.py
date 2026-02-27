@@ -373,8 +373,10 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
                 messagebox.showerror("오류", "문제 추가에 실패했습니다.")
                 return
         
+        selection = cat_listbox.curselection()
+        current_cat = cat_listbox.get(selection[0]) if selection else "전체"
         clear_inputs()
-        refresh_list()
+        refresh_list(current_cat)
     
     # 추가/수정 버튼 (동적으로 텍스트 변경)
     action_button = tk.Button(
@@ -401,9 +403,23 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
     cancel_button.pack(side='left', padx=5)
     cancel_button.pack_forget()  # 처음엔 숨김
     
+    # 리스트 영역 상위 프레임 (사이드바 + 리스트)
+    content_frame = tk.Frame(popup, bg='#f0f0f0')
+    content_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+
+    # 카테고리 사이드바
+    sidebar = tk.Frame(content_frame, width=150, bg='#ffffff', relief='solid', borderwidth=1)
+    sidebar.pack(side='left', fill='y', padx=(0, 5))
+    sidebar.pack_propagate(False)
+
+    tk.Label(sidebar, text="📁 카테고리", font=("맑은 고딕", 10, "bold"), bg='#ffffff').pack(pady=(10, 5))
+    
+    cat_listbox = tk.Listbox(sidebar, font=("맑은 고딕", 10), bd=0, highlightthickness=0, selectmode='single', bg='#ffffff')
+    cat_listbox.pack(fill='both', expand=True, padx=5, pady=5)
+    
     # 리스트 영역 프레임
-    list_frame = tk.Frame(popup, bg='#ffffff', relief='solid', borderwidth=1)
-    list_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+    list_frame = tk.Frame(content_frame, bg='#ffffff', relief='solid', borderwidth=1)
+    list_frame.pack(side='left', fill='both', expand=True)
     
     # 리스트 제목
     list_title = tk.Label(
@@ -422,9 +438,11 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
     scrollbar = ttk.Scrollbar(tree_frame)
     scrollbar.pack(side='right', fill='y')
     
+    # original_q를 보이지 않는 컬럼으로 추가 (순서 조절 및 원본 데이터 유지용)
     tree = ttk.Treeview(
         tree_frame,
-        columns=('category', 'question', 'answer'),
+        columns=('category', 'question', 'answer', 'original_q'),
+        displaycolumns=('category', 'question', 'answer'),
         height=12,
         yscrollcommand=scrollbar.set
     )
@@ -432,15 +450,24 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
     
     tree.column('#0', width=0, stretch='no')
     tree.column('category', anchor='center', width=100)
-    tree.column('question', anchor='w', width=600)
+    tree.column('question', anchor='w', width=500)
     tree.column('answer', anchor='center', width=80)
+    tree.column('original_q', width=0, stretch='no')
     
     tree.heading('#0', text='', anchor='w')
     tree.heading('category', text='카테고리', anchor='center')
-    tree.heading('question', text='문제', anchor='w')
+    tree.heading('question', text='문제 (순서 조절: 드래그)', anchor='w')
     tree.heading('answer', text='정답', anchor='center')
     
     tree.pack(fill='both', expand=True)
+
+    def on_category_select(event):
+        selection = cat_listbox.curselection()
+        if selection:
+            cat = cat_listbox.get(selection[0])
+            refresh_list(cat)
+
+    cat_listbox.bind('<<ListboxSelect>>', on_category_select)
     
     def on_tree_select(event):
         """리스트에서 항목을 선택했을 때 입력 필드에 채웁니다."""
@@ -448,38 +475,34 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
         if not selected:
             return
         
-        # 선택된 항목의 데이터 가져오기
+        # 선택된 항목의 데이터 가져오기 (인덱스 3에 원본 문제 저장됨)
         item = selected[0]
         item_data = tree.item(item)
-        category = item_data['values'][0]
-        question_display = item_data['values'][1]
-        answer = item_data['values'][2]
+        original_question = item_data['values'][3]
         
-        # 전체 문제 목록에서 원본 문제 찾기
-        for original_question, quiz_data in problem_manager.get_all_quizzes().items():
-            # 새로운 형식과 구형식 모두 지원
+        # 전체 문제 목록에서 데이터 가져오기
+        quiz_data = problem_manager.get_all_quizzes().get(original_question)
+        if quiz_data:
             if isinstance(quiz_data, dict):
-                original_answer = quiz_data.get("answer", "")
-                original_category = quiz_data.get("category", "")
+                answer = quiz_data.get("answer", "")
+                category = quiz_data.get("category", "")
             else:
-                original_answer = quiz_data
-                original_category = ""
+                answer = quiz_data
+                category = ""
             
-            if original_question[:60] + ("..." if len(original_question) > 60 else "") == question_display or original_question == question_display:
-                # 입력 필드에 채우기
-                question_entry.delete("1.0", "end")
-                question_entry.insert("1.0", original_question)
-                answer_entry.delete(0, "end")
-                answer_entry.insert(0, original_answer)
-                category_entry.delete(0, "end")
-                category_entry.insert(0, original_category)
-                
-                # 수정 모드 활성화
-                edit_mode["active"] = True
-                edit_mode["original_question"] = original_question
-                
-                update_button_states()
-                break
+            # 입력 필드에 채우기
+            question_entry.delete("1.0", "end")
+            question_entry.insert("1.0", original_question)
+            answer_entry.delete(0, "end")
+            answer_entry.insert(0, answer)
+            category_entry.delete(0, "end")
+            category_entry.insert(0, category)
+            
+            # 수정 모드 활성화
+            edit_mode["active"] = True
+            edit_mode["original_question"] = original_question
+            
+            update_button_states()
     
     def update_button_states():
         """버튼 상태를 업데이트합니다."""
@@ -493,15 +516,41 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
     # 리스트 선택 이벤트 연결
     tree.bind('<<TreeviewSelect>>', on_tree_select)
     
-    def refresh_list():
+    def refresh_categories():
+        """카테고리 목록을 바에서 새로고침합니다."""
+        current_selection = cat_listbox.curselection()
+        selected_cat = cat_listbox.get(current_selection[0]) if current_selection else "전체"
+        
+        cat_listbox.delete(0, "end")
+        cat_listbox.insert("end", "전체")
+        
+        # 유니크 카테고리 추출
+        categories = set()
+        for quiz_data in problem_manager.get_all_quizzes().values():
+            if isinstance(quiz_data, dict):
+                cat = quiz_data.get("category", "")
+                if cat:
+                    categories.add(cat)
+        
+        for cat in sorted(list(categories)):
+            cat_listbox.insert("end", cat)
+            
+        # 기존 선택 유지
+        idx = 0
+        for i in range(cat_listbox.size()):
+            if cat_listbox.get(i) == selected_cat:
+                idx = i
+                break
+        cat_listbox.select_set(idx)
+        cat_listbox.see(idx)
+
+    def refresh_list(selected_category="전체"):
         """목록을 새로고침합니다."""
         for item in tree.get_children():
             tree.delete(item)
         
-        for idx, (question, quiz_data) in enumerate(problem_manager.get_all_quizzes().items()):
-            # 문제는 최대 60글자까지만 표시 (카테고리 컬럼 추가로 너비 조정)
-            display_question = question[:60] + "..." if len(question) > 60 else question
-            
+        quizzes = problem_manager.get_all_quizzes()
+        for idx, (question, quiz_data) in enumerate(quizzes.items()):
             # 새로운 형식과 구형식 모두 지원
             if isinstance(quiz_data, dict):
                 answer = quiz_data.get("answer", "")
@@ -510,7 +559,58 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
                 answer = quiz_data
                 category = ""
             
-            tree.insert('', 'end', text=str(idx+1), values=(category, display_question, answer))
+            # 카테고리 필터링
+            if selected_category != "전체" and category != selected_category:
+                continue
+            
+            # 표시는 요약본, 실제 데이터는 original_q 컬럼에 유지
+            display_question = question[:100] + "..." if len(question) > 100 else question
+            tree.insert('', 'end', values=(category, display_question, answer, question))
+        
+        refresh_categories()
+    
+    def save_order():
+        """트리뷰의 현재 순서대로 json 파일을 다시 저장합니다."""
+        # 전체 보기일 때만 순서 조절 가능 (다른 카테고리가 섞여있으면 보존이 어려움)
+        selection = cat_listbox.curselection()
+        if selection and cat_listbox.get(selection[0]) != "전체":
+            return
+            
+        new_answers = {}
+        all_quizzes = problem_manager.get_all_quizzes()
+        
+        for item in tree.get_children():
+            original_q = tree.item(item)['values'][3]
+            if original_q in all_quizzes:
+                new_answers[original_q] = all_quizzes[original_q]
+        
+        # 순서가 보장되는 딕셔너리로 교체 후 저장
+        problem_manager.quiz_answers = new_answers
+        problem_manager.save_quizzes()
+        if gui_logger:
+            gui_logger("↔️ 문제 순서가 변경되어 저장되었습니다.")
+
+    # 드래그 앤 드롭 구현
+    def on_drag_start(event):
+        item = tree.identify_row(event.y)
+        if item:
+            tree.drag_item = item
+
+    def on_drag_stop(event):
+        target_item = tree.identify_row(event.y)
+        source_item = getattr(tree, 'drag_item', None)
+        
+        if source_item and target_item and source_item != target_item:
+            # 타겟 위치 확인 (위에 놓는지 아래에 놓는지)
+            target_idx = tree.index(target_item)
+            tree.move(source_item, '', target_idx)
+            save_order()
+        
+        tree.drag_item = None
+
+    # 전체 보기일 때만 드래그 앤 드롭 바인딩
+    tree.bind("<Button-1>", on_drag_start, add="+")
+    tree.bind("<ButtonRelease-1>", on_drag_stop, add="+")
     
     def delete_selected():
         """선택된 문제를 삭제합니다."""
@@ -519,23 +619,20 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
             messagebox.showwarning("경고", "삭제할 문제를 선택하세요.")
             return
         
-        # 선택된 항목의 인덱스 구하기
         item = selected[0]
-        question_display = tree.item(item)['values'][1]  # 인덱스 1로 수정 (0은 카테고리)
+        original_question = tree.item(item)['values'][3]
         
-        # 전체 문제에서 매칭되는 문제 찾기
-        for question, quiz_data in problem_manager.get_all_quizzes().items():
-            if question[:60] + ("..." if len(question) > 60 else "") == question_display or question == question_display:
-                if messagebox.askyesno("확인", f"다음 문제를 삭제하시겠습니까?\n{question[:50]}..."):
-                    if problem_manager.delete_quiz(question):
-                        messagebox.showinfo("성공", "문제가 삭제되었습니다.")
-                        clear_inputs()  # 입력 필드 초기화
-                        refresh_list()
-                        if gui_logger:
-                            gui_logger(f"🗑️ 퀴즈 삭제: {question[:30]}...")
-                    else:
-                        messagebox.showerror("오류", "문제 삭제에 실패했습니다.")
-                break
+        if messagebox.askyesno("확인", f"다음 문제를 삭제하시겠습니까?\n{original_question[:50]}..."):
+            if problem_manager.delete_quiz(original_question):
+                messagebox.showinfo("성공", "문제가 삭제되었습니다.")
+                selection = cat_listbox.curselection()
+                current_cat = cat_listbox.get(selection[0]) if selection else "전체"
+                clear_inputs()  # 입력 필드 초기화
+                refresh_list(current_cat)
+                if gui_logger:
+                    gui_logger(f"🗑️ 퀴즈 삭제: {original_question[:30]}...")
+            else:
+                messagebox.showerror("오류", "문제 삭제에 실패했습니다.")
     
     delete_button = tk.Button(
         button_frame,
@@ -547,29 +644,7 @@ def open_survey_problem_manager(parent_window, gui_logger=None, initial_question
         padx=20
     )
     delete_button.pack(side='left', padx=5)
-    
-    def clear_all():
-        """모든 문제를 삭제합니다."""
-        if messagebox.askyesno("확인", "정말로 모든 문제를 삭제하시겠습니까?\n(되돌릴 수 없습니다)"):
-            if problem_manager.clear_all():
-                messagebox.showinfo("성공", "모든 문제가 삭제되었습니다.")
-                clear_inputs()  # 입력 필드 초기화
-                refresh_list()
-                if gui_logger:
-                    gui_logger("🗑️ 모든 퀴즈 삭제됨")
-            else:
-                messagebox.showerror("오류", "삭제에 실패했습니다.")
-    
-    clear_button = tk.Button(
-        button_frame,
-        text="🗑️ 전체 삭제",
-        font=("맑은 고딕", 10, "bold"),
-        bg='#95a5a6',
-        fg='white',
-        command=clear_all,
-        padx=20
-    )
-    clear_button.pack(side='left', padx=5)
+
     
     # 하단 버튼
     bottom_frame = tk.Frame(popup, bg='#f0f0f0')

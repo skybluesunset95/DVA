@@ -1,11 +1,18 @@
 {
-  "auto_attendance": false,
-  "auto_quiz": false,
-  "auto_seminar_check": false,
-  "auto_survey": false,
+  "auto_attendance": true,
+  "auto_attendance_hour": 9,
+  "auto_attendance_min": 10,
+  "auto_quiz": true,
+  "auto_quiz_hour": 9,
+  "auto_quiz_min": 10,
+  "auto_survey": true,
+  "auto_seminar_refresh": true,
   "auto_seminar_join": true,
   "auto_seminar_enter": false,
-  "seminar_enter_delay": 5,
-  "seminar_refresh_interval": 60,
-  "browser_headless": true
+  "seminar_enter_delay": 2,
+  "seminar_refresh_interval": 5,
+  "browser_headless": false,
+  "settings_window_width": 520,
+  "settings_window_height": 898,
+  "auto_seminar_check": false
 }

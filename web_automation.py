@@ -15,6 +15,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 import shutil
+import json
 
 # 브라우저 설정
 BROWSER_CONFIG = {
@@ -25,10 +26,31 @@ BROWSER_CONFIG = {
 }
 
 class WebAutomation:
-    def __init__(self):
+    def __init__(self, headless=None):
         self.driver = None
         self.wait = None
         self.logger = self._setup_logger()
+        
+        # 설정 로드
+        self.headless = headless
+        if self.headless is None:
+            self.headless = self._load_headless_setting()
+        
+        # BROWSER_CONFIG 업데이트
+        BROWSER_CONFIG['headless'] = self.headless
+
+    def _load_headless_setting(self):
+        """settings.json에서 headless 설정을 로드합니다."""
+        try:
+            settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                return settings.get('browser_headless', False)
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"설정 로드 중 오류 발생 (기본값 False 사용): {e}")
+        return False
         
     def _setup_logger(self):
         """로거 설정"""
@@ -204,11 +226,29 @@ class WebAutomation:
     
     def close_driver(self):
         """웹드라이버 종료"""
-        if self.driver:
-            try:
+        try:
+            if self.driver:
                 self.driver.quit()
-                self.logger.info("웹드라이버가 종료되었습니다.")
-            except Exception as e:
-                self.logger.error(f"웹드라이버 종료 실패: {str(e)}")
-    
-
+                self.driver = None
+        except Exception as e:
+            self.logger.error(f"드라이버 종료 중 오류 발생: {str(e)}")
+            
+    def close_other_windows(self, keep_window_handle):
+        """지정된 윈도우 핸들을 제외한 모든 창을 닫습니다."""
+        try:
+            if not self.driver:
+                return
+                
+            all_windows = self.driver.window_handles
+            for window in all_windows:
+                if window != keep_window_handle:
+                    try:
+                        self.driver.switch_to.window(window)
+                        self.driver.close()
+                    except Exception as e:
+                        self.logger.error(f"창 닫기 실패: {str(e)}")
+                        
+            # 다시 메인 창으로 포커스
+            self.driver.switch_to.window(keep_window_handle)
+        except Exception as e:
+            self.logger.error(f"창 정리 중 오류: {str(e)}")
