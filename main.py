@@ -18,7 +18,7 @@ class DoctorBillApp:
         
         # 환경변수에서 계정 이름 가져오기 (기본값: 'default')
         account_name = os.environ.get('ACCOUNT_NAME', 'default')
-        self.settings_file = f"settings_{account_name}.json" if account_name != 'default' else "settings.json"
+        self.settings_file = os.path.join("data", f"settings_{account_name}.json" if account_name != 'default' else "settings.json")
         
         self.default_settings = {
             'auto_attendance': True,
@@ -98,6 +98,7 @@ class DoctorBillApp:
             'on_seminar_check': self.on_seminar_check,
             'on_survey_open': self.on_survey_open,
             'on_survey_problem': self.on_survey_problem,
+            'on_quiz_problem': self.on_quiz_problem,
             'on_baemin_purchase': self.on_baemin_purchase,
             'on_settings': self.open_settings,
             'on_exit': self.on_closing,
@@ -136,24 +137,39 @@ class DoctorBillApp:
     def on_survey_open(self):
         self.task_manager.execute_survey(self.get_callbacks())
 
-    def on_survey_problem(self):
-        self.open_survey_problem()
+    def on_survey_problem(self, initial_question=None, initial_category=None, image_path=None):
+        self.open_survey_problem(initial_question, initial_category, image_path)
         
     def open_survey_problem(self, initial_question=None, initial_category=None, image_path=None):
         try:
             from ui.dialogs.survey_problem_dialog import open_survey_problem_manager
-            
-            # 스크린샷이 있으면 먼저 열어서 보여주기
-            if image_path and os.path.exists(image_path):
-                try:
-                    os.startfile(image_path)
-                except Exception as e:
-                    self.log_message(f"❌ 스크린샷 열기 실패: {e}")
-                    
+            if image_path:
+                paths = image_path if isinstance(image_path, list) else [image_path]
+                for p in paths:
+                    if os.path.exists(p):
+                        try: os.startfile(p)
+                        except: pass
             self.log_message("설문 문제 관리 창을 열고 있습니다...")
             open_survey_problem_manager(self.root, self.log_message, initial_question, initial_category)
         except Exception as e:
-            self.log_message(f"❌ 문제 관리자를 열 수 없습니다: {e}")
+            self.log_message(f"❌ 설문 관리자를 열 수 없습니다: {e}")
+
+    def on_quiz_problem(self, initial_question=None, initial_category=None, image_path=None):
+        self.open_daily_quiz(initial_question, initial_category, image_path)
+
+    def open_daily_quiz(self, initial_question=None, initial_category=None, image_path=None):
+        try:
+            from ui.dialogs.quiz_dialog import open_quiz_manager
+            if image_path:
+                paths = image_path if isinstance(image_path, list) else [image_path]
+                for p in paths:
+                    if os.path.exists(p):
+                        try: os.startfile(p)
+                        except: pass
+            self.log_message("퀴즈 문제 관리 창을 열고 있습니다...")
+            open_quiz_manager(self.root, self.log_message, initial_question, initial_category)
+        except Exception as e:
+            self.log_message(f"❌ 퀴즈 관리자를 열 수 없습니다: {e}")
 
     def on_baemin_purchase(self):
         try:

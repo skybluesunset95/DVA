@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 블로그 검색 모듈
-quiz_module_new에서 이어질 순서로 특정 웹페이지를 새 탭에서 열기
+quiz_module에서 이어질 순서로 특정 웹페이지를 새 탭에서 열기
 """
 
 import logging
@@ -244,11 +244,8 @@ class BlogSearchModule(BaseModule):
                                         self.log_info(f"   📝 원본 텍스트: {text_content}")
                                         self.log_info(f"   ✅ 추출된 정답: {answer}")
                                         
-                                        # iframe에서 빠져나오기
+                                        # iframe에서 빠져나오기 (탭 정리는 quiz_module이 관리)
                                         self.web_automation.driver.switch_to.default_content()
-                                        
-                                        # 정답 추출 성공 후 탭 정리 및 첫 번째 탭으로 돌아가기
-                                        self.cleanup_tabs_and_return()
                                         return True
                                     else:
                                         self.log_info("❌ se-text div에서 정답 패턴을 찾을 수 없었습니다.")

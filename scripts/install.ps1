@@ -4,7 +4,8 @@ Write-Host "Checking Python..." -ForegroundColor Cyan
 python --version 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Python found!" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "Python not found. Installing..." -ForegroundColor Yellow
     
     $pythonUrl = "https://www.python.org/ftp/python/3.13.1/python-3.13.1-amd64.exe"
@@ -32,7 +33,7 @@ if ($LASTEXITCODE -eq 0) {
         Write-Host "Python installed! Reloading environment..." -ForegroundColor Green
         
         # Refresh PATH
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
         
         # Verify installation
         Start-Sleep -Seconds 2
@@ -42,7 +43,8 @@ if ($LASTEXITCODE -eq 0) {
             Read-Host "Press Enter"
             exit 1
         }
-    } catch {
+    }
+    catch {
         Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
         Read-Host "Press Enter"
         exit 1
@@ -52,11 +54,12 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host ""
 Write-Host "Installing packages..." -ForegroundColor Cyan
 python -m pip install --upgrade pip --quiet --disable-pip-version-check
-python -m pip install -r requirements.txt
+python -m pip install -r "$PSScriptRoot\requirements.txt"
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Packages installed successfully!" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "Package installation failed!" -ForegroundColor Red
     Read-Host "Press Enter"
     exit 1
@@ -66,17 +69,20 @@ Write-Host ""
 Write-Host "Setting up account information..." -ForegroundColor Cyan
 Write-Host ""
 
+$accountName = Read-Host "Enter ACCOUNT_NAME (e.g. your name. Only English and numbers recommended)"
 $accountUsername = Read-Host "Enter ACCOUNT_USERNAME (your email)"
 $accountPassword = Read-Host "Enter ACCOUNT_PASSWORD (your password)" -AsSecureString
 $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToCoTaskMemUnicode($accountPassword))
 
 # Create account batch file
-$batContent = "@echo off`r`nchcp 65001 >nul 2>&1`r`nset ACCOUNT_USERNAME=$accountUsername`r`nset ACCOUNT_PASSWORD=$plainPassword`r`nstart /min `"`" pythonw main_GUI.pyw"
+$batFileName = "$accountName`_닥터빌.bat"
+$batContent = "@echo off`r`nchcp 65001 >nul 2>&1`r`nset ACCOUNT_NAME=$accountName`r`nset ACCOUNT_USERNAME=$accountUsername`r`nset ACCOUNT_PASSWORD=$plainPassword`r`nstart /min `"`" pythonw main.py"
 
 try {
-    $batContent | Out-File -FilePath "account.bat" -Encoding ASCII -Force
-    Write-Host "Account file created successfully!" -ForegroundColor Green
-} catch {
+    $batContent | Out-File -FilePath $batFileName -Encoding UTF8 -Force
+    Write-Host "Account file '$batFileName' created successfully!" -ForegroundColor Green
+}
+catch {
     Write-Host "Error creating account file: $($_.Exception.Message)" -ForegroundColor Red
     Read-Host "Press Enter"
     exit 1

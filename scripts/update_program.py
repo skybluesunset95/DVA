@@ -89,8 +89,8 @@ class UpdateGUI:
 
 class DoctorBillUpdater:
     def __init__(self):
-        # update_program.py가 있는 폴더를 기준으로 설정
-        self.current_dir = Path(__file__).parent
+        # update_program.py가 scripts 폴더에 있으므로, 부모의 부모 폴더(루트)를 기준으로 설정
+        self.current_dir = Path(__file__).parent.parent
         self.backup_dir = self.current_dir / "backup_temp"
         self.github_repo = "https://api.github.com/repos/skybluesunset95/DVA"
         self.github_download = "https://github.com/skybluesunset95/DVA/archive/main.zip"
@@ -103,11 +103,14 @@ class DoctorBillUpdater:
         
         # 업데이트할 파일/폴더들
         self.update_targets = [
-            'main_GUI.pyw',
+            'main.py',
             'main_task_manager.py', 
             'web_automation.py',
             'modules/',
-            'requirements.txt',
+            'ui/',
+            'docs/',
+            'data/',
+            'scripts/',
             'README.md'
         ]
     

@@ -52,7 +52,7 @@ python -m pip install -r requirements.txt
    chcp 65001 >nul 2>&1
    set ACCOUNT_USERNAME=your-email@naver.com
    set ACCOUNT_PASSWORD=your-password
-   start /min "" pythonw main_GUI.pyw
+   start /min "" pythonw main.py
    ```
    - `your-email@naver.com`을 실제 이메일로 변경하세요
    - `your-password`를 실제 비밀번호로 변경하세요

@@ -168,7 +168,7 @@ class ModuleFactory:
     MODULE_INFO = {
         'login': ('modules.login_module', 'LoginModule'),
         'attendance': ('modules.attendance_module', 'AttendanceModule'),
-        'quiz': ('modules.quiz_module_new', 'QuizModuleNew'),
+        'quiz': ('modules.quiz_module', 'QuizModule'),
         'survey': ('modules.survey_module', 'SurveyModule'),
         'seminar': ('modules.seminar_module', 'SeminarModule'),
         'baemin': ('modules.baemin_module', 'BaeminModule'),

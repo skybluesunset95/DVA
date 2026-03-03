@@ -220,9 +220,9 @@ chromedriver
 config.ini
 *.log
 
-# JSON 파일 (survey_quizzes.json 제외)
-*.json
-!survey_quizzes.json
+# 데이터 및 설정 (survey_quizzes.json 제외)
+data/*.json
+!data/survey_quizzes.json
 
 # 백업 파일들
 backup/
@@ -237,6 +237,9 @@ tmp/
 # AI Agent 관련 파일들
 .agent/
 .gemini/
+
+# 문서 및 가이드 파일들 (폴더째 제외)
+docs/
 
 # 마크다운 파일(README.md 제외)
 *.md
