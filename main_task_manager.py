@@ -6,6 +6,7 @@
 
 import threading
 import logging
+import time
 from datetime import datetime
 from web_automation import WebAutomation
 from modules.base_module import (
@@ -34,6 +35,8 @@ class TaskManagerState:
         self._last_auto_quiz_date = None
         self._last_seminar_refresh_time = None
         self._is_seminar_refresh_paused = False
+        self._previous_seminar_titles = set()
+        self._entered_seminar_links = set() # 자동 입장 완료된 링크 저장
         self._startup_time = datetime.now()
     
     @property
@@ -200,11 +203,52 @@ class TaskManager:
         self.logger = logging.getLogger(__name__)
         self._module_cache = {}  # 모듈 클래스 캐시
     
-    def initialize_web_automation(self):
+    def initialize_web_automation(self, gui_callbacks=None):
         """웹드라이버가 없으면 초기화"""
         if not self.state.web_automation:
-            self.state.web_automation = WebAutomation()
+            # 설정에서 브라우저 헤드리스 모드 여부 확인
+            headless = None
+            if gui_callbacks and 'gui_instance' in gui_callbacks and gui_callbacks['gui_instance']:
+                try:
+                    headless = gui_callbacks['gui_instance'].get_setting('browser_headless')
+                except:
+                    pass
+            
+            self.state.web_automation = WebAutomation(headless=headless)
         return self.state.web_automation
+    
+    def ensure_web_automation_alive(self, gui_callbacks):
+        """브라우저가 열려있는지 확인하고 닫혔으면 재로그인 수행"""
+        web_auto = self.state.web_automation or self.initialize_web_automation(gui_callbacks)
+        
+        if not web_auto.is_alive():
+            self.logger.info("브라우저가 닫혀있음을 감지했습니다. 자동 복구(재로그인)를 시도합니다.")
+            if gui_callbacks and 'log_message' in gui_callbacks:
+                gui_callbacks['log_message']("⚠ 브라우저가 닫혀있습니다. 자동 복구(재로그인)를 시도합니다...")
+            
+            # 현재 어떤 모듈이 실행 중인지 잠시 기억했다가 복구 후 진행
+            original_module = self.state.current_module
+            
+            # 로그인 모듈 실행 (동기 방식)
+            try:
+                login_class = self.get_module_class('login')
+                login_module = login_class(web_auto, self.create_gui_logger(gui_callbacks))
+                login_module.set_callbacks(gui_callbacks)
+                login_result = login_module.execute()
+                
+                # 상태 원복
+                self.state.current_module = original_module
+                
+                is_success = login_result.get('success', False) if isinstance(login_result, dict) else bool(login_result)
+                if not is_success:
+                    self.logger.error("브라우저 자동 복구 실패")
+                    return None
+            except Exception as e:
+                self.logger.error(f"브라우저 자동 복구 중 오류: {str(e)}")
+                self.state.current_module = original_module
+                return None
+                
+        return web_auto
     
     def create_gui_logger(self, gui_callbacks):
         """통일된 GUI 로거 생성 - 단순화"""
@@ -269,7 +313,16 @@ class TaskManager:
     def execute_module_safely(self, module_class, module_name, gui_callbacks):
         """모듈 실행 공통 로직"""
         try:
-            web_auto = self.state.web_automation or self.initialize_web_automation()
+            # 브라우저 확보 및 생존 확인
+            if module_name == "로그인":
+                web_auto = self.state.web_automation or self.initialize_web_automation(gui_callbacks)
+            else:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                
+            if not web_auto:
+                self.log_error(module_name, "브라우저를 초기화할 수 없습니다.", gui_callbacks)
+                return
+
             gui_logger = self.create_gui_logger(gui_callbacks)
             
             # 현재 모듈 상태 업데이트
@@ -374,8 +427,10 @@ class TaskManager:
         def _run():
             try:
                 self.state.current_module = 'seminar_view'
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return
+
                 module_class = self.get_module_class('seminar')
-                web_auto = self.state.web_automation or self.initialize_web_automation()
                 gui_logger = self.create_gui_logger(gui_callbacks)
                 
                 seminar = module_class(web_auto, gui_logger)
@@ -424,8 +479,10 @@ class TaskManager:
 
         def _run():
             try:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return
+
                 module_class = self.get_module_class('seminar')
-                web_auto = self.state.web_automation or self.initialize_web_automation()
                 gui_logger = self.create_gui_logger(gui_callbacks)
                 seminar = module_class(web_auto, gui_logger)
                 seminar.set_callbacks(gui_callbacks)
@@ -458,8 +515,10 @@ class TaskManager:
         """개별 세미나 액션 처리 (더블클릭)"""
         def _run():
             try:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return
+
                 module_class = self.get_module_class('seminar')
-                web_auto = self.state.web_automation or self.initialize_web_automation()
                 gui_logger = self.create_gui_logger(gui_callbacks)
                 seminar = module_class(web_auto, gui_logger)
                 seminar.set_callbacks(gui_callbacks)
@@ -477,29 +536,117 @@ class TaskManager:
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def _handle_seminar_refresh(self, gui_callbacks):
-        """세미나 목록 새로고침"""
+    def _handle_seminar_refresh(self, gui_callbacks, settings=None):
+        """세미나 목록 새로고침 및 종료 감지 기반 자동 설문 트리거"""
         def _run():
             try:
                 self.state.current_module = 'seminar_refresh'
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return
+
                 module_class = self.get_module_class('seminar')
-                web_auto = self.state.web_automation or self.initialize_web_automation()
                 gui_logger = self.create_gui_logger(gui_callbacks)
                 seminar = module_class(web_auto, gui_logger)
                 seminar.set_callbacks(gui_callbacks)
 
                 gui_callbacks['log_message']("🔄 세미나 목록을 새로고침합니다...")
                 seminars_res = seminar.get_seminar_list()
-                if isinstance(seminars_res, dict):
-                    seminars = seminars_res.get('data', [])
-                else:
-                    seminars = seminars_res
                 
+                # 결과 목록 추출
+                current_seminars = seminars_res.get('data', []) if isinstance(seminars_res, dict) else seminars_res
+                current_titles = {s.get('title', '') for s in current_seminars if s.get('title')}
+
+                # [추가] 자동 설문 트리거 로직: 세미나 종료 감지
+                if settings and settings.get('auto_survey'):
+                    # 이전 목록이 있고 (첫 실행 제외), 이전에 있던 제목이 현재 없으면 종료로 간주
+                    if self.state._previous_seminar_titles:
+                        ended_seminars = self.state._previous_seminar_titles - current_titles
+                        if ended_seminars:
+                            self.logger.info(f"세미나 종료 감지: {ended_seminars}")
+                            gui_callbacks['log_message'](f"📢 세미나 종료 감지: {list(ended_seminars)[0]} 외 {len(ended_seminars)-1}건" if len(ended_seminars) > 1 else f"📢 세미나 종료 감지: {list(ended_seminars)[0]}")
+                            gui_callbacks['log_message']("📝 자동 설문참여를 시작합니다...")
+                            
+                            # 설문 모듈 실행 (별도 스레드에서 돌아가도록 위임)
+                            self.execute_survey(gui_callbacks)
+                
+                # [추가] 자동 세미나 입장 로직: 시작 시간 기반
+                if settings and settings.get('auto_seminar_enter'):
+                    try:
+                        delay_min = int(settings.get('seminar_enter_delay', 5))
+                    except:
+                        delay_min = 5
+                        
+                    now = datetime.now()
+                    today_str = f"{now.month}/{now.day}"
+                    
+                    # 입장 대상 수집
+                    targets = []
+                    for s in current_seminars:
+                        title = s.get('title', '')
+                        link = s.get('detail_link', '')
+                        time_str = s.get('time', '')
+                        date_str = s.get('date', '')
+                        
+                        from modules.utils import get_status_tag
+                        if date_str == today_str and get_status_tag(s.get('status', '')) == '입장하기' and link not in self.state._entered_seminar_links:
+                            try:
+                                start_time_part = time_str.split('~')[0].strip()
+                                start_h, start_m = map(int, start_time_part.split(':'))
+                                start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                                
+                                from datetime import timedelta
+                                enter_time = start_dt + timedelta(minutes=delay_min)
+                                
+                                # 1. 예약된 시간이 지났고
+                                # 2. 그 예약 시각이 '프로그램 시작 시각' 이후인 경우에만 실행 (재시작 시 중복 방지)
+                                if now >= enter_time and enter_time >= self.state.startup_time:
+                                    targets.append((link, title))
+                                    self.state._entered_seminar_links.add(link) # 중복 방지
+                            except: continue
+
+                    # 수집된 대상이 있으면 순차적으로 실행
+                    if targets:
+                        def _sequential_enter(entry_list):
+                            for link, title in entry_list:
+                                gui_callbacks['log_message'](f"🚪 세미나 자동 입장을 시작합니다: {title}")
+                                self.auto_enter_seminar(link, title, gui_callbacks)
+                                time.sleep(5) # 브라우저 안정화를 위해 5초 대기 후 다음 입장 진행
+                        
+                        threading.Thread(target=_sequential_enter, args=(targets,), daemon=True).start()
+
+                # 이전 목록 갱신 (설정 여부와 상관없이 항상 최신 상태 유지)
+                self.state._previous_seminar_titles = current_titles
+
                 if 'update_seminar_dialog' in gui_callbacks:
-                    gui_callbacks['update_seminar_dialog'](seminars)
+                    gui_callbacks['update_seminar_dialog'](current_seminars)
                 
             except Exception as e:
                 gui_callbacks['log_error'](f"새로고침 중 오류: {str(e)}")
+            finally:
+                self.state.current_module = None
+                gui_callbacks['update_status']("대기 중")
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _handle_auto_seminar_join(self, gui_callbacks):
+        """자동 세미나 신청 처리"""
+        def _run():
+            try:
+                self.state.current_module = 'seminar_auto_apply'
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return
+
+                module_class = self.get_module_class('seminar')
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+
+                result = seminar.auto_apply_available_seminars()
+                count = result.get('data', {}).get('count', 0) if isinstance(result, dict) else 0
+                if count > 0:
+                    gui_callbacks['log_message'](f"✅ 자동 세미나 신청 완료: {count}개")
+            except Exception as e:
+                self.logger.error(f"자동 세미나 신청 오류: {str(e)}")
             finally:
                 self.state.current_module = None
                 gui_callbacks['update_status']("대기 중")
@@ -510,8 +657,10 @@ class TaskManager:
         """배민 쿠폰 구매를 위한 초기 정보(포인트, 번호)를 가져옵니다."""
         try:
             self.state.current_module = 'baemin'
+            web_auto = self.ensure_web_automation_alive(gui_callbacks)
+            if not web_auto: return {'points': 0, 'max_coupons': 0, 'phone': ''}
+
             module_class = self.get_module_class('baemin')
-            web_auto = self.state.web_automation or self.initialize_web_automation()
             gui_logger = self.create_gui_logger(gui_callbacks)
             
             baemin = module_class(web_auto, gui_logger)
@@ -547,8 +696,10 @@ class TaskManager:
         def _run():
             try:
                 self.state.current_module = 'baemin'
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return
+
                 module_class = self.get_module_class('baemin')
-                web_auto = self.state.web_automation or self.initialize_web_automation()
                 gui_logger = self.create_gui_logger(gui_callbacks)
                 
                 baemin = module_class(web_auto, gui_logger)
@@ -579,8 +730,10 @@ class TaskManager:
         """최신 세미나 목록을 수집하여 반환합니다."""
         try:
             self.state.current_module = 'seminar_collect'
+            web_auto = self.ensure_web_automation_alive(gui_callbacks)
+            if not web_auto: return []
+
             module_class = self.get_module_class('seminar')
-            web_auto = self.state.web_automation or self.initialize_web_automation()
             gui_logger = self.create_gui_logger(gui_callbacks)
             
             seminar = module_class(web_auto, gui_logger)
@@ -600,8 +753,10 @@ class TaskManager:
         """세미나 자동 신청 및 목록 새로고침을 수행합니다."""
         try:
             # 이 작업은 백그라운드 스레드에서 실행되므로 직접 클래스 생성
+            web_auto = self.ensure_web_automation_alive(gui_callbacks)
+            if not web_auto: return 0, []
+
             module_class = self.get_module_class('seminar')
-            web_auto = self.state.web_automation or self.initialize_web_automation()
             gui_logger = self.create_gui_logger(gui_callbacks)
             
             seminar = module_class(web_auto, gui_logger)
@@ -621,8 +776,10 @@ class TaskManager:
         """특정 세미나에 자동으로 입장합니다."""
         try:
             self.state.current_module = 'auto_enter'
+            web_auto = self.ensure_web_automation_alive(gui_callbacks)
+            if not web_auto: return False
+
             module_class = self.get_module_class('seminar')
-            web_auto = self.state.web_automation or self.initialize_web_automation()
             gui_logger = self.create_gui_logger(gui_callbacks)
             
             # 상대 경로 처리
@@ -698,7 +855,16 @@ class TaskManager:
                 if self.state.last_seminar_refresh_time is None or (now - self.state.last_seminar_refresh_time).total_seconds() >= refresh_interval:
                     self.state.last_seminar_refresh_time = now
                     gui_callbacks['update_status']("자동 세미나 수집 중...")
-                    self._handle_seminar_refresh(gui_callbacks)
+                    self._handle_seminar_refresh(gui_callbacks, settings)
+                    return True
+
+            # 4. 자동 세미나 신청 체크 (새로고침 직후에만 실행되도록 설계)
+            if settings.get('auto_seminar_join') and settings.get('auto_seminar_refresh'):
+                # 새로고침이 방금 일어났고 (2초 이내), 현재 다른 작업이 없다면 신청 시도
+                if (self.state.last_seminar_refresh_time is not None and 
+                    (now - self.state.last_seminar_refresh_time).total_seconds() < 2 and
+                    self.state.current_module is None):
+                    self._handle_auto_seminar_join(gui_callbacks)
                     return True
 
             return False

@@ -234,6 +234,52 @@ class SeminarModule(BaseModule):
         script = "document.querySelector('#modalType2 .btn_confirm')?.click();"
         self.web_automation.driver.execute_script(script)
 
+    def auto_apply_available_seminars(self):
+        """신청 가능한 세미나를 자동으로 전부 신청합니다."""
+        try:
+            seminars = self.get_seminar_list()
+            if not seminars:
+                return self.create_result(True, "진행 중인 세미나가 없습니다", {"count": 0, "seminars": []})
+
+            # 모든 날짜의 세미나 중 '신청가능' 상태인 것 필터링
+            targets = []
+            for s in seminars:
+                status_tag = get_status_tag(s.get('status', ''))
+                if status_tag == '신청가능':
+                    targets.append(s)
+            
+            if not targets:
+                return self.create_result(True, "자동 신청할 세미나가 없습니다", {"count": 0, "seminars": []})
+            
+            success_count = 0
+            for s in targets:
+                title = s.get('title', '제목 없음')
+                detail_link = s.get('detail_link', '')
+                if not detail_link: continue
+                
+                self.log_info(f"자동 신청 시도 중: {title}")
+                res = self.handle_seminar_action(detail_link, '신청가능')
+                
+                success = res.get('success', False) if isinstance(res, dict) else bool(res)
+                if success:
+                    success_count += 1
+                    self.log_success(f"자동 신청 완료: {title}")
+                else:
+                    msg = res.get('message', '실패') if isinstance(res, dict) else '실패'
+                    self.log_warning(f"자동 신청 실패: {title} ({msg})")
+                
+                time.sleep(1) # 연속 신청 시 안정성을 위해 딜레이
+                
+            return self.create_result(
+                success_count > 0, 
+                f"총 {len(targets)}개 중 {success_count}개 자동 신청 완료", 
+                {"count": success_count, "seminars": targets}
+            )
+        except Exception as e:
+            error_msg = f"자동 신청 프로세스 중 오류: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
+
     def execute(self):
         """세미나 정보 수집 실행"""
         try:

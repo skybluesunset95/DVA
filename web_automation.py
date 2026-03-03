@@ -40,8 +40,19 @@ class WebAutomation:
         BROWSER_CONFIG['headless'] = self.headless
 
     def _load_headless_setting(self):
-        """settings.json에서 headless 설정을 로드합니다."""
+        """환경설정 파일에서 headless 설정을 로드합니다."""
         try:
+            # 1. ACCOUNT_NAME 환경변수 확인 (메인 앱 방식)
+            account_name = os.environ.get('ACCOUNT_NAME')
+            if account_name:
+                filename = f"settings_{account_name}.json" if account_name != 'default' else "settings.json"
+                settings_path = os.path.join("data", filename)
+                if os.path.exists(settings_path):
+                    with open(settings_path, 'r', encoding='utf-8') as f:
+                        settings = json.load(f)
+                    return settings.get('browser_headless', False)
+
+            # 2. 로컬 settings.json 확인 (독립 실행 방식)
             settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
             if os.path.exists(settings_path):
                 with open(settings_path, 'r', encoding='utf-8') as f:
@@ -223,6 +234,17 @@ class WebAutomation:
         if self.driver:
             return self.driver.title
         return None
+    
+    def is_alive(self):
+        """브라우저가 열려있는지 확인"""
+        try:
+            if not self.driver:
+                return False
+            # current_url 접근을 시도하여 브라우저 상태 확인
+            _ = self.driver.current_url
+            return True
+        except Exception:
+            return False
     
     def close_driver(self):
         """웹드라이버 종료"""

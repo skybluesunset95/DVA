@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import re
+import ctypes
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -76,78 +77,79 @@ class SurveyModule(BaseModule):
     def _auto_click_seminar(self, original_window):
         """내부에서 동기적으로 세미나 클릭 및 설문 로직을 수행합니다."""
         try:
-            # 페이지 로딩 완료 대기 (세미나 목록이 나타날 때까지)
+            from datetime import datetime
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            self.log_info(f"📅 오늘 날짜({today_str}) 세미나 설문 조사를 시작합니다.")
+
+            # 1. 대상 세미나 URL 선행 수집
             self.web_automation.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, LIVE_LIST_CONTAINER_SELECTOR))
             )
             
-            # 세미나 목록 가져오기
-            seminar_list = self.web_automation.driver.find_elements(
-                By.CSS_SELECTOR, 
-                ".live_list .list_cont a.list_detail"
-            )
+            containers = self.web_automation.driver.find_elements(By.CSS_SELECTOR, ".live_list .list_cont")
+            targets = []
             
-            if not seminar_list:
-                self.log_error("세미나 목록을 찾을 수 없습니다")
-                return self.create_result(False, "세미나 목록을 찾을 수 없습니다.")
-            
-            # 첫 번째 세미나 시도
-            self.log_info("첫 번째 세미나를 시도합니다...")
-            
-            first_seminar = seminar_list[0]
-            seminar_title = first_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
-            
-            self.log_info(f"첫 번째 세미나 발견: {seminar_title}")
-            
-            # 링크 클릭
-            first_seminar.click()
-            
-            self.log_info("✅ 첫 번째 세미나 자동 선택 완료")
-            self.log_info("재입장하기 버튼을 찾는 중...")
-            
-            # 🔥 재입장하기 버튼 자동 클릭
-            if not self.auto_click_reenter_button():
-                # 첫 번째 세미나에 재입장 버튼이 없으면 두 번째 세미나 시도
-                if len(seminar_list) >= 2:
-                    self.log_info("첫 번째 세미나에 재입장 버튼이 없습니다. 두 번째 세미나를 시도합니다...")
+            for container in containers:
+                try:
+                    text = container.text
+                    if today_str in text:
+                        link_elem = container.find_element(By.CSS_SELECTOR, "a.list_detail")
+                        href = link_elem.get_attribute('href')
+                        title = container.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
+                        
+                        # 중복 방지를 위해 URL 기준 저장
+                        if href and not any(t['url'] == href for t in targets):
+                            targets.append({'url': href, 'title': title})
+                except:
+                    continue
+
+            if not targets:
+                self.log_warning(f"오늘 날짜({today_str})의 세미나를 찾을 수 없습니다.")
+                return self.create_result(True, "오늘 참여할 세미나가 없습니다.")
+
+            self.log_info(f"📋 오늘 참여 대상 세미나 {len(targets)}건을 발견했습니다.")
+
+            # 2. 수집된 URL 순차 방문 및 처리
+            success_count = 0
+            for i, target in enumerate(targets):
+                try:
+                    self.log_info(f"🔍 세미나 확인 중 ({i+1}/{len(targets)}): {target['title']}")
                     
-                    # 뒤로가기
-                    self.web_automation.driver.back()
-                    time.sleep(2)  # 페이지 로딩 대기
-                    
-                    # 페이지 이동 후 세미나 목록을 다시 찾기 (Stale Element Reference 방지)
-                    seminar_list = self.web_automation.driver.find_elements(
-                        By.CSS_SELECTOR, 
-                        ".live_list .list_cont a.list_detail"
-                    )
-                    
-                    if len(seminar_list) >= 2:
-                        # 두 번째 세미나 클릭
-                        second_seminar = seminar_list[1]
-                        seminar_title = second_seminar.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
-                        
-                        self.log_info(f"두 번째 세미나 발견: {seminar_title}")
-                        
-                        second_seminar.click()
-                        
-                        self.log_info("✅ 두 번째 세미나 자동 선택 완료")
-                        self.log_info("재입장하기 버튼을 찾는 중...")
-                        
-                        # 두 번째 세미나에서도 재입장 버튼 확인
-                        if not self.auto_click_reenter_button():
-                            self.log_warning("두 번째 세미나에도 재입장 버튼이 없습니다.")
+                    # 상세 페이지로 직접 이동
+                    self.web_automation.driver.get(target['url'])
+                    time.sleep(2)
+
+                    # 재입장하기 버튼 확인 및 처리
+                    if self.auto_click_reenter_button():
+                        self.log_success(f"✅ 설문 참여 성공: {target['title']}")
+                        success_count += 1
+                        # 설문 페이지가 열렸을 수 있으므로 목록 페이지로 리셋
+                        self.web_automation.driver.get(VOD_LIST_PAGE_URL)
+                        time.sleep(1)
                     else:
-                        self.log_warning("두 번째 세미나가 없습니다.")
-                else:
-                    self.log_warning("두 번째 세미나가 없습니다.")
+                        self.log_info(f"ℹ 재입장 버튼 없음 (혹은 이미 완료): {target['title']}")
+                        # 상세 페이지에서 바로 다음으로 넘어가면 되므로 get 생략 가능하지만 안전을 위해 호출
+                        # (상태가 바뀌어 있을 수도 있으므로 다시 목록으로 나감)
+                        self.web_automation.driver.get(VOD_LIST_PAGE_URL)
+                        time.sleep(1)
+
+                except Exception as ie:
+                    self.log_error(f"⚠️ 세미나 처리 중 오류 ({target['title']}): {str(ie)}")
+                    self.web_automation.driver.get(VOD_LIST_PAGE_URL)
+                    time.sleep(1)
             
-            return self.create_result(True, "설문 참여 처리가 완료되었습니다.")
+            return self.create_result(True, f"총 {len(targets)}건 중 {success_count}건의 설문을 처리했습니다.")
+
+        except Exception as e:
+            error_msg = f"설문 세미나 순회 중 오류: {str(e)}"
+            self.log_error(error_msg)
+            return self.create_result(False, error_msg)
 
         except Exception as e:
             error_msg = f"{ERROR_FIRST_SEMINAR_SELECTION}: {str(e)}"
             self.log_error(error_msg)
             return self.create_result(False, error_msg)
-            
+
         finally:
             if original_window and self.web_automation and self.web_automation.driver:
                 try:
@@ -682,6 +684,12 @@ class SurveyModule(BaseModule):
             for i, text_input in enumerate(text_inputs):
                 if not text_input.get_attribute('value').strip():
                     try:
+                        # 최소 글자수 제한이 있는지 확인
+                        parent_li = text_input.find_element(By.XPATH, "./ancestor::li")
+                        if self._check_char_limit(parent_li):
+                            self.log_warning(f"재시도: 텍스트 입력 필드 {i+1}번은 글자수 제한이 있어 자동 입력을 건너뜁니다.")
+                            continue
+                            
                         text_input.clear()
                         text_input.send_keys("없습니다.")
                         self.log_info(f"재시도: 텍스트 입력 필드 {i+1}번 답변 입력")
@@ -705,6 +713,12 @@ class SurveyModule(BaseModule):
             for i, textarea in enumerate(textarea_inputs):
                 if not textarea.get_attribute('value').strip():
                     try:
+                        # 최소 글자수 제한이 있는지 확인
+                        parent_li = textarea.find_element(By.XPATH, "./ancestor::li")
+                        if self._check_char_limit(parent_li):
+                            self.log_warning(f"재시도: textarea {i+1}번은 글자수 제한이 있어 자동 입력을 건너뜁니다.")
+                            continue
+
                         textarea.clear()
                         textarea.send_keys("없습니다.")
                         self.log_info(f"재시도: textarea 필드 {i+1}번 답변 입력")
@@ -959,13 +973,23 @@ class SurveyModule(BaseModule):
                                     question_processed = True
                                 
                         elif input_type == 'text':
-                            # 텍스트 입력: 무조건 "없습니다." 입력
-                            if not first_input.get_attribute('value').strip():
-                                first_input.clear()
-                                text_to_enter = "없습니다."
-                                first_input.send_keys(text_to_enter)
-                                self.log_info(f"문제 {question_number}번: 텍스트 '{text_to_enter}' 자동 입력 완료")
-                                question_processed = True
+                            # 텍스트 입력: 글자수 제한 확인
+                            char_limit = self._check_char_limit(question)
+                            if char_limit:
+                                self.log_warning(f"⚠️ {question_number}번 문제: 최소 {char_limit}자 제한이 발견되었습니다. 직접 입력을 대기합니다 (2분)...")
+                                if self._wait_for_manual_input(first_input, char_limit):
+                                    self.log_success(f"✅ {question_number}번 문제: 직접 입력 확인 완료.")
+                                    question_processed = True
+                                else:
+                                    self.log_error(f"❌ {question_number}번 문제: 대기 시간 초과")
+                                    return False
+                            else:
+                                if not first_input.get_attribute('value').strip():
+                                    first_input.clear()
+                                    text_to_enter = "없습니다."
+                                    first_input.send_keys(text_to_enter)
+                                    self.log_info(f"문제 {question_number}번: 텍스트 '{text_to_enter}' 자동 입력 완료")
+                                    question_processed = True
                                 
                         elif input_type == 'email':
                             # 이메일 입력: "a@gmail.com" 입력
@@ -977,13 +1001,24 @@ class SurveyModule(BaseModule):
                                 question_processed = True
                                 
                         elif first_input.tag_name == 'textarea': # input_type for textarea is usually None or empty string, so check tag_name
-                            # 텍스트란 무조건 "없습니다." 입력
-                            if not first_input.get_attribute('value'):
-                                text_to_enter = "없습니다."
-                                first_input.send_keys(text_to_enter)
-                                self.log_info(f"문제 {question_number}번: 주관식 '{text_to_enter}' 자동 입력 완료")
+                            # 텍스트란 글자수 제한 확인
+                            char_limit = self._check_char_limit(question)
+                            if char_limit:
+                                self.log_warning(f"⚠️ {question_number}번 문제: 최소 {char_limit}자 주관식 제한이 발견되었습니다. 직접 입력을 대기합니다 (2분)...")
+                                if self._wait_for_manual_input(first_input, char_limit):
+                                    self.log_success(f"✅ {question_number}번 문제: 주관식 직접 입력 확인 완료.")
+                                    question_processed = True
+                                else:
+                                    self.log_error(f"❌ {question_number}번 문제: 주관식 대기 시간 초과")
+                                    return False
                             else:
-                                self.log_info(f"문제 {question_number}번: 주관식 이미 입력되어 있음")
+                                if not first_input.get_attribute('value'):
+                                    text_to_enter = "없습니다."
+                                    first_input.send_keys(text_to_enter)
+                                    self.log_info(f"문제 {question_number}번: 주관식 '{text_to_enter}' 자동 입력 완료")
+                                    question_processed = True
+                                else:
+                                    self.log_info(f"문제 {question_number}번: 주관식 이미 입력되어 있음")
                                 
                     except Exception as e:
                         self.log_error(f"문제 {question_number}번 처리 중 오류: {str(e)}")
@@ -1004,6 +1039,53 @@ class SurveyModule(BaseModule):
             self.log_error(f"문제 순서대로 처리 실패: {str(e)}")
             return False
     
+    def _check_char_limit(self, question_elem):
+        """질문 항목 내에 최소 글자 수 제한이 있는지 확인합니다."""
+        try:
+            text = question_elem.text
+            if "최소" in text and "자" in text:
+                match = re.search(r'최소\s*(\d+)\s*자', text)
+                if match:
+                    return int(match.group(1))
+        except:
+            pass
+        return None
+
+    def _wait_for_manual_input(self, input_elem, limit, timeout=600): # 10분으로 증가
+        """사용자가 직접 최소 글자 수 이상 입력할 때까지 대기합니다."""
+        # 팝업 알림 띄우기
+        self._show_manual_input_alert(limit)
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # 세션 유효성 확인
+            try:
+                _ = self.web_automation.driver.title
+            except:
+                return False
+
+            try:
+                current_value = input_elem.get_attribute('value').strip()
+                if len(current_value) >= limit:
+                    return True
+            except:
+                pass
+            
+            time.sleep(1)
+        return False
+
+    def _show_manual_input_alert(self, limit):
+        """윈도우 팝업 알림을 띄웁니다."""
+        try:
+            def run_popup():
+                msg = f"⚠️ 주관식 답변에 최소 {limit}자 제한이 발견되었습니다.\n\n브라우저 창을 열어 직접 입력을 완료해주세요.\n(내용 입력 후 질문 창을 벗어나면 자동으로 다음 단계가 진행됩니다.)"
+                # MB_OK(0) | MB_ICONINFORMATION(0x40) | MB_SYSTEMMODAL(0x1000)
+                ctypes.windll.user32.MessageBoxW(0, msg, "DVA 설문 알림", 0x40 | 0x1000)
+            
+            threading.Thread(target=run_popup, daemon=True).start()
+        except:
+            pass
+
     def _normalize_question_text(self, question: str) -> str:
         
         # [퀴즈] 태그 제거
@@ -1056,6 +1138,12 @@ class SurveyModule(BaseModule):
             
             for text_input in text_inputs:
                 try:
+                    # 최소 글자수 제한이 있는지 확인
+                    parent_li = text_input.find_element(By.XPATH, "./ancestor::li")
+                    if self._check_char_limit(parent_li):
+                        self.log_warning(f"주관식 {text_count+1}번은 글자수 제한이 있어 자동 입력을 건너뜁니다.")
+                        continue
+
                     text_input.clear()
                     text_input.send_keys("없습니다.")
                     text_count += 1
@@ -1082,6 +1170,12 @@ class SurveyModule(BaseModule):
             
             for textarea in textarea_inputs:
                 try:
+                    # 최소 글자수 제한이 있는지 확인
+                    parent_li = textarea.find_element(By.XPATH, "./ancestor::li")
+                    if self._check_char_limit(parent_li):
+                        self.log_warning(f"textarea {textarea_count+1}번은 글자수 제한이 있어 자동 입력을 건너뜁니다.")
+                        continue
+
                     textarea.clear()
                     textarea.send_keys("없습니다.")
                     textarea_count += 1
