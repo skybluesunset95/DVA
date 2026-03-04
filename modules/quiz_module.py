@@ -9,7 +9,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from .base_module import BaseModule
 from .quiz_problem import QuizProblemManager
-from .utils import find_project_root
 import time
 import os
 
