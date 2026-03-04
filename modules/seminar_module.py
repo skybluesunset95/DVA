@@ -108,7 +108,7 @@ class SeminarModule(BaseModule):
         """세미나 메인 페이지로 이동"""
         try:
             self.web_automation.driver.get(SEMINAR_URL)
-            self.web_automation.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, LOADING_SELECTOR)))
+            self.find_element_safe(By.CSS_SELECTOR, LOADING_SELECTOR)
             return True
         except Exception as e:
             self._log('COLLECT_ERROR', error=str(e))
@@ -138,13 +138,14 @@ class SeminarModule(BaseModule):
     def _fallback_collect(self):
         seminars = []
         try:
-            items = self.web_automation.driver.find_elements(By.CSS_SELECTOR, ".list_detail")
+            items = self.find_elements_safe(By.CSS_SELECTOR, ".list_detail")
             for item in items:
                 try:
+                    # item이 stale된 경우 에러 발생하므로 individual extract 시에도 주의
                     parent = item.find_element(By.XPATH, "./ancestor::div[contains(@class, 'list_cont')]")
                     seminars.append(self._extract_seminar_data(item, parent))
-                except: continue
-        except: pass
+                except Exception: continue
+        except Exception: pass
         return seminars
 
     def _extract_seminar_data(self, item, parent):
@@ -177,9 +178,12 @@ class SeminarModule(BaseModule):
             button = None
             for sel in config['selectors']:
                 try:
-                    if sel['type'] == 'id': button = self.web_automation.driver.find_element(By.ID, sel['value'])
-                    elif sel['type'] == 'css': button = self.web_automation.driver.find_element(By.CSS_SELECTOR, sel['value'])
-                    elif sel['type'] == 'xpath': button = self.web_automation.driver.find_element(By.XPATH, sel['value'])
+                    if sel['type'] == 'id': 
+                        button = self.find_element_safe(By.ID, sel['value'], timeout=5)
+                    elif sel['type'] == 'css': 
+                        button = self.find_element_safe(By.CSS_SELECTOR, sel['value'], timeout=5)
+                    elif sel['type'] == 'xpath': 
+                        button = self.find_element_safe(By.XPATH, sel['value'], timeout=5)
                     if button: break
                 except: continue
             
@@ -220,6 +224,26 @@ class SeminarModule(BaseModule):
         except: return False
 
     def enter_seminar(self):
+        try:
+            # 다중 세미나 창 덮어쓰기 방지 (고유 window.open 이름 강제 지정 및 _blank 처리)
+            script = """
+            if (!window._originalOpenForSeminar) {
+                window._originalOpenForSeminar = window.open;
+                window.open = function(url, windowName, windowFeatures) {
+                    var uniqueName = "win_" + new Date().getTime() + "_" + Math.floor(Math.random() * 1000);
+                    return window._originalOpenForSeminar(url, uniqueName, windowFeatures);
+                };
+            }
+            document.querySelectorAll('a.btn_enter').forEach(function(el) {
+                if (el.getAttribute('target') && el.getAttribute('target') !== '_blank') {
+                    el.setAttribute('target', '_blank');
+                }
+            });
+            """
+            self.web_automation.driver.execute_script(script)
+        except Exception as e:
+            self._log('ENTER_ERROR', error=f"팝업 오버라이드 스크립트 적용 실패: {str(e)}")
+            
         return self._click_button_with_fallback(BUTTON_CONFIGS['seminar_enter'])
 
     def _handle_popup_confirmations(self):

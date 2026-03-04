@@ -80,8 +80,8 @@ class AttendanceModule(BaseModule):
             self.web_automation.driver.implicitly_wait(0)
             
             try:
-                # 출석하기 버튼을 즉시 찾기
-                button = self.web_automation.driver.find_element(By.CLASS_NAME, ATTEND_BUTTON_CLASS)
+                # 출석하기 버튼을 안전하게 찾기 (짧은 타임아웃)
+                button = self.find_element_safe(By.CLASS_NAME, ATTEND_BUTTON_CLASS, timeout=3)
                 self.log_info("출석하기 버튼 발견")
                 
                 # 버튼 클릭
@@ -108,9 +108,9 @@ class AttendanceModule(BaseModule):
     def _check_success_popup(self):
         """성공 팝업 확인"""
         try:
-            self.web_automation.wait.until(EC.visibility_of_element_located((By.ID, SUCCESS_POPUP_ID)))
+            self.find_element_safe(By.ID, SUCCESS_POPUP_ID, timeout=5)
             self.log_info("출석체크 성공! 포인트가 적립되었습니다.")
-        except TimeoutException:
+        except Exception:
             self.log_info("출석체크 완료 (성공 팝업 확인 불가)")
     
     def _check_points_after_attendance(self):

@@ -54,40 +54,30 @@ class QuizModule(BaseModule):
     def wait_for_page_load(self, timeout=None):
         """페이지 로딩 완료 대기"""
         try:
-            # 기존 web_automation.wait 사용 (timeout 설정됨)
-            self.web_automation.wait.until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
+            self.find_element_safe(By.TAG_NAME, "body", timeout=timeout or 10)
             return True
-        except TimeoutException:
+        except Exception:
             return False
     
     def wait_for_element_presence(self, element_id, timeout=None):
         """특정 요소의 존재 대기"""
         try:
-            # 더 짧은 timeout으로 빠르게 실패
-            short_timeout = timeout or DEFAULT_SHORT_TIMEOUT  # 기본 1초로 단축
-            from selenium.webdriver.support.ui import WebDriverWait
-            short_wait = WebDriverWait(self.web_automation.driver, short_timeout)
-            short_wait.until(
-                EC.presence_of_element_located((By.ID, element_id))
-            )
+            self.find_element_safe(By.ID, element_id, timeout=timeout or DEFAULT_SHORT_TIMEOUT)
             return True
-        except TimeoutException:
+        except Exception:
             return False
     
     def wait_for_element_clickable(self, element_id, timeout=None):
         """특정 요소의 클릭 가능 상태 대기"""
         try:
-            # 더 짧은 timeout으로 빠르게 실패
-            short_timeout = timeout or DEFAULT_SHORT_TIMEOUT  # 기본 1초로 단축
             from selenium.webdriver.support.ui import WebDriverWait
-            short_wait = WebDriverWait(self.web_automation.driver, short_timeout)
-            short_wait.until(
+            from selenium.webdriver.support import expected_conditions as EC
+            short_timeout = timeout or DEFAULT_SHORT_TIMEOUT
+            WebDriverWait(self.web_automation.driver, short_timeout).until(
                 EC.element_to_be_clickable((By.ID, element_id))
             )
             return True
-        except TimeoutException:
+        except Exception:
             return False
     
     def handle_element_not_found(self, element_name):
@@ -345,7 +335,7 @@ class QuizModule(BaseModule):
                 self.log_warning(f"JavaScript 확인 실패, 일반 방법으로 시도: {str(js_error)}")
                 
                 # JavaScript 실패 시 일반 방법으로 확인
-                quiz_elements = self.web_automation.driver.find_elements(By.CSS_SELECTOR, QUIZ_CSS_SELECTOR)
+                quiz_elements = self.find_elements_safe(By.CSS_SELECTOR, QUIZ_CSS_SELECTOR)
                 
                 if len(quiz_elements) >= MIN_QUIZ_ELEMENTS:
                     self.log_success(f"퀴즈 요소 {len(quiz_elements)}개 발견")
@@ -364,7 +354,7 @@ class QuizModule(BaseModule):
             self.log_info("퀴즈 요소를 클릭하는 중...")
             
             # quiz_bg 클래스를 가진 요소들 찾기
-            quiz_elements = self.web_automation.driver.find_elements(By.CSS_SELECTOR, QUIZ_CSS_SELECTOR)
+            quiz_elements = self.find_elements_safe(By.CSS_SELECTOR, QUIZ_CSS_SELECTOR)
             
             if len(quiz_elements) >= MIN_QUIZ_ELEMENTS:
                 self.log_success(f"퀴즈 요소 {len(quiz_elements)}개 발견")
@@ -412,24 +402,17 @@ class QuizModule(BaseModule):
             self.log_info("퀴즈 버튼을 클릭하는 중...")
             
             # 퀴즈 버튼 찾기
-            quiz_button = self.web_automation.driver.find_element(By.ID, QUIZ_BANNER_BUTTON_ID)
+            quiz_button = self.find_element_safe(By.ID, QUIZ_BANNER_BUTTON_ID)
             
             if quiz_button:
-                # 버튼이 클릭 가능한 상태가 될 때까지 대기
-                if not self.wait_for_element_clickable(QUIZ_BANNER_BUTTON_ID):
-                    return self.handle_element_not_found("클릭 가능한 퀴즈 버튼")
-                
                 # 퀴즈 버튼 클릭
                 quiz_button.click()
-                
                 self.log_success("퀴즈 버튼 클릭 완료 - 팝업창이 열렸습니다")
                 return True
             else:
                 self.log_error("퀴즈 버튼을 찾을 수 없습니다.")
                 return False
                 
-        except NoSuchElementException:
-            return self.handle_element_not_found("퀴즈 버튼")
         except Exception as e:
             return self.handle_general_error("퀴즈 버튼 클릭", e)
 
@@ -440,11 +423,11 @@ class QuizModule(BaseModule):
         try:
             self.log_info("퀴즈 정보 수집 시작...")
             
-            # 제품 정보 수집
-            product_title = self.web_automation.driver.find_element(By.ID, PRODUCT_TITLE_ID).text.strip()
-            product_category = self.web_automation.driver.find_element(By.ID, PRODUCT_CATEGORY_ID).text.strip()
-            product_title_eng = self.web_automation.driver.find_element(By.ID, PRODUCT_TITLE_ENG_ID).text.strip()
-            quiz_point = self.web_automation.driver.find_element(By.ID, QUIZ_POINT_ID).text.strip()
+            # 제품 정보 수집 (안전하게 탐색)
+            product_title = self.find_element_safe(By.ID, PRODUCT_TITLE_ID).text.strip()
+            product_category = self.find_element_safe(By.ID, PRODUCT_CATEGORY_ID).text.strip()
+            product_title_eng = self.find_element_safe(By.ID, PRODUCT_TITLE_ENG_ID).text.strip()
+            quiz_point = self.find_element_safe(By.ID, QUIZ_POINT_ID).text.strip()
             
             self.log_info(f"=== 퀴즈 정보 ===")
             self.log_info(f"제품명: {product_title}")
@@ -464,10 +447,10 @@ class QuizModule(BaseModule):
                 'questions': []
             }
             
-            # 퀴즈 문제 영역 컨테이너만 사용 (다른 영역의 .question_area 제외)
+            # 퀴즈 문제 영역 컨테이너만 사용
             try:
-                quiz_container = self.web_automation.driver.find_element(By.ID, QUESTION_AREA_CONTAINER_ID)
-            except NoSuchElementException:
+                quiz_container = self.find_element_safe(By.ID, QUESTION_AREA_CONTAINER_ID)
+            except Exception:
                 self.log_error(f"퀴즈 문제 영역(id={QUESTION_AREA_CONTAINER_ID})을 찾을 수 없습니다.")
                 return None
             
@@ -489,34 +472,44 @@ class QuizModule(BaseModule):
             # 각 문제 번호(n)에 대해 해당 .question{n}을 포함한 .question_area만 수집
             for n in range(1, question_count + 1):
                 try:
-                    question_num_elem = quiz_container.find_element(By.CSS_SELECTOR, f".question{n}")
+                    # 각 요소 수집 시 stale 에러 방지를 위해 매번 driver 기반으로 찾거나 safe 함수 활용
+                    # quiz_container가 stale될 수 있으므로 driver 기반 find_element_safe 활용 권장
+                    question_num_elem = self.find_element_safe(By.CSS_SELECTOR, f"#{QUESTION_AREA_CONTAINER_ID} .question{n}")
                     question_number = question_num_elem.text.strip()
-                    # .question{n}이 속한 .question_area 찾기 (closest)
+                    
+                    # .question{n}이 속한 .question_area 찾기
                     question_area = self.web_automation.driver.execute_script(
                         "return arguments[0].closest('.question_area');", question_num_elem
                     )
+                    
                     if not question_area:
                         self.log_error(f"문제 {n}: .question_area를 찾을 수 없습니다.")
                         continue
                     
-                    # 문제 내용
-                    question_text = question_area.find_element(By.CSS_SELECTOR, QUESTION_TEXT_SELECTOR).text.strip()
+                    # q_area 내부 요소도 safe하게 찾기 위해 base_selector 구성
+                    q_area_css = f"#{QUESTION_AREA_CONTAINER_ID} .question{n}"
+                    parent_area_selector = f"div.question_area:has(.question{n})" # CSS :has 지원 시
                     
-                    # 보기들 수집
-                    choices = question_area.find_elements(By.CSS_SELECTOR, QUESTION_CHOICE_SELECTOR)
-                    choice_list = []
+                    # 텍스트 및 보기 수집
+                    question_text = self.web_automation.driver.execute_script(
+                        f"var qElem = arguments[0].querySelector('{QUESTION_TEXT_SELECTOR}'); return qElem ? qElem.innerText.trim() : '';", question_area
+                    )
                     
-                    for choice in choices:
-                        choice_text = choice.find_element(By.CSS_SELECTOR, CHOICE_LABEL_SELECTOR).text.strip()
-                        choice_value = choice.find_element(By.CSS_SELECTOR, CHOICE_INPUT_SELECTOR).get_attribute("value")
-                        choice_list.append(f"{choice_value}. {choice_text}")
+                    # 보기들 수집 (JS로 한 번에 가져오는 것이 가장 안전)
+                    choice_data = self.web_automation.driver.execute_script(f"""
+                        var choices = arguments[0].querySelectorAll('{QUESTION_CHOICE_SELECTOR}');
+                        return Array.from(choices).map(c => {{
+                            var label = c.querySelector('{CHOICE_LABEL_SELECTOR}');
+                            var input = c.querySelector('{CHOICE_INPUT_SELECTOR}');
+                            return {{
+                                text: label ? label.innerText.trim() : '',
+                                value: input ? input.value : ''
+                            }};
+                        }});
+                    """, question_area)
                     
-                    choice_values = []
-                    for choice in choice_list:
-                        if '. ' in choice:
-                            choice_values.append(choice.split('. ', 1)[0])
-                        else:
-                            choice_values.append(choice)
+                    choice_list = [f"{c['value']}. {c['text']}" for c in choice_data]
+                    choice_values = [str(c['value']) for c in choice_data]
                     
                     quiz_data['questions'].append({
                         'number': question_number,
@@ -577,6 +570,11 @@ class QuizModule(BaseModule):
             
             # 4. 라디오 버튼 선택 (JS 완전 제어 - 팝업 내부 요소 대응)
             try:
+                # 팝업 자체가 사라졌는지 재검사
+                if not self.wait_for_condition_safe(lambda: self.find_element_safe(By.ID, QUIZ_LAYER_POP_ID).is_displayed()):
+                    self.log_error("퀴즈 팝업이 사라졌습니다.")
+                    return False
+
                 num_only = "".join(filter(str.isdigit, question_num))
                 radio_selector = f"input[name='an_{num_only}'][value='{correct_val}']"
                 self.log_info(f"🔍 셀렉터: {radio_selector}")
@@ -632,35 +630,26 @@ class QuizModule(BaseModule):
         return self.web_automation.driver.execute_script(js_code, radio_selector)
 
 
-
     def click_submit_button(self):
         """정답 도전 버튼 클릭"""
         try:
             self.log_info("정답 도전 버튼을 찾는 중...")
             
-            # 정답 도전 버튼이 클릭 가능한 상태가 될 때까지 대기
-            if not self.wait_for_element_clickable(ANSWER_CONFIRM_BUTTON_ID):
-                return self.handle_element_not_found("클릭 가능한 정답 도전 버튼")
-            
             # 정답 도전 버튼 찾기
-            submit_button = self.web_automation.driver.find_element(By.ID, ANSWER_CONFIRM_BUTTON_ID)
+            submit_button = self.find_element_safe(By.ID, ANSWER_CONFIRM_BUTTON_ID)
             
             if submit_button:
                 # 정답 도전 버튼 클릭
                 submit_button.click()
-                
                 self.log_success("정답 도전 버튼 클릭 완료")
                 
-                # 결과 처리 대기 (성공/실패 메시지 등)
+                # 결과 처리 대기
                 time.sleep(2)
-                
                 return True
             else:
                 self.log_error("정답 도전 버튼을 찾을 수 없습니다.")
                 return False
                 
-        except NoSuchElementException:
-            return self.handle_element_not_found("정답 도전 버튼")
         except Exception as e:
             return self.handle_general_error("정답 도전 버튼 클릭", e)
 
@@ -708,20 +697,18 @@ class QuizModule(BaseModule):
                     # 네이버 블로그 전용: 본문 iframe으로 전환 시도 및 스크롤
                     try:
                         # 1단계: mainFrame 찾기
-                        main_frame = self.web_automation.driver.find_element(By.ID, "mainFrame")
+                        main_frame = self.find_element_safe(By.ID, "mainFrame")
                         self.web_automation.driver.switch_to.frame(main_frame)
                         
-                        # 2단계: 정답이 몰려있는 영역(보통 이미지나 텍스트 하단)으로 스크롤
-                        # 3번째 이미지 혹은 특정 텍스트 요소를 찾아 중앙 배치 시도
-                        se_images = self.web_automation.driver.find_elements(By.CLASS_NAME, "se-image-resource")
+                        # 2단계: 정답이 몰려있는 영역으로 스크롤
+                        se_images = self.find_elements_safe(By.CLASS_NAME, "se-image-resource")
                         if len(se_images) >= 3:
-                            target_hint = se_images[2] # 3번째 이미지가 보통 퀴즈 영역 근처
+                            target_hint = se_images[2]
                             self.web_automation.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_hint)
                         else:
-                            # 이미지가 부족하면 그냥 적당히 스크롤
                             self.web_automation.driver.execute_script("window.scrollTo(0, 1000);")
                         
-                        time.sleep(1.0) # 로딩/정지 대기
+                        time.sleep(1.0)
                     except:
                         # iframe을 못 찾거나 스크롤 실패 시 그냥 진행
                         pass

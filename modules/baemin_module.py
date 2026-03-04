@@ -110,7 +110,7 @@ class BaeminModule(BaseModule):
             phone_lines = "\n".join([phone_number] * quantity)
             self.log_info(f"연락처 입력 중... ({phone_number} × {quantity}개)")
             
-            textarea = driver.find_element(By.ID, "rcvMobiles")
+            textarea = self.find_element_safe(By.ID, "rcvMobiles")
             textarea.clear()
             textarea.send_keys(phone_lines)
             
@@ -121,7 +121,7 @@ class BaeminModule(BaseModule):
             
             # 발송 수량 확인
             try:
-                cnt_element = driver.find_element(By.ID, "rcvMobileCnt")
+                cnt_element = self.find_element_safe(By.ID, "rcvMobileCnt", timeout=5)
                 cnt = cnt_element.text.strip()
                 self.log_info(f"총 발송 수량: {cnt}건")
             except:
@@ -151,11 +151,11 @@ class BaeminModule(BaseModule):
             
             # 8단계: 상품금액 가져와서 포인트 입력
             try:
-                price_element = driver.find_element(By.CSS_SELECTOR, "#total_goods_price span")
+                price_element = self.find_element_safe(By.CSS_SELECTOR, "#total_goods_price span")
                 price_text = price_element.text.strip().replace(',', '')
                 self.log_info(f"상품금액: {price_text}원")
                 
-                point_input = driver.find_element(By.ID, "point_etc1")
+                point_input = self.find_element_safe(By.ID, "point_etc1")
                 point_input.clear()
                 point_input.send_keys(price_text)
                 self.log_success(f"엠서클 포인트 {price_text}원 입력 완료")

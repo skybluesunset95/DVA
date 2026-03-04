@@ -82,17 +82,18 @@ class SurveyModule(BaseModule):
             self.log_info(f"📅 오늘 날짜({today_str}) 세미나 설문 조사를 시작합니다.")
 
             # 1. 대상 세미나 URL 선행 수집
-            self.web_automation.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, LIVE_LIST_CONTAINER_SELECTOR))
-            )
+            self.find_element_safe(By.CSS_SELECTOR, LIVE_LIST_CONTAINER_SELECTOR)
             
-            containers = self.web_automation.driver.find_elements(By.CSS_SELECTOR, ".live_list .list_cont")
+            containers = self.find_elements_safe(By.CSS_SELECTOR, ".live_list .list_cont")
             targets = []
             
             for container in containers:
                 try:
+                    # container가 stale된 경우를 대비해 텍스트와 하위 요소를 안전하게 가져옴
                     text = container.text
                     if today_str in text:
+                        # 하위 요소 탐색 시에도 driver 기반 selector 권장이나, 
+                        # 여기서는 container를 그대로 쓰되 에러 시 skip
                         link_elem = container.find_element(By.CSS_SELECTOR, "a.list_detail")
                         href = link_elem.get_attribute('href')
                         title = container.find_element(By.CSS_SELECTOR, SEMINAR_TITLE_SELECTOR).text.strip()
@@ -100,7 +101,7 @@ class SurveyModule(BaseModule):
                         # 중복 방지를 위해 URL 기준 저장
                         if href and not any(t['url'] == href for t in targets):
                             targets.append({'url': href, 'title': title})
-                except:
+                except Exception:
                     continue
 
             if not targets:
@@ -181,18 +182,10 @@ class SurveyModule(BaseModule):
         try:
             self.log_info("재입장하기 버튼 검색 중...")
             
-            # 재입장하기 버튼이 있는지 먼저 확인 (타임아웃 2초로 단축)
+            # 재입장하기 버튼이 있는지 먼저 확인
             try:
-                # 페이지 로딩 대기 (재입장하기 버튼이 나타날 때까지)
-                WebDriverWait(self.web_automation.driver, 2).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, REENTER_BUTTON_SELECTOR))
-                )
-                
-                # 재입장하기 버튼 찾기
-                reenter_button = self.web_automation.driver.find_element(
-                    By.CSS_SELECTOR, 
-                    REENTER_BUTTON_SELECTOR
-                )
+                # find_element_safe를 사용하여 짧은 타임아웃으로 확인
+                reenter_button = self.find_element_safe(By.CSS_SELECTOR, REENTER_BUTTON_SELECTOR, timeout=3)
                 
                 self.log_info("재입장하기 버튼 발견")
                 
@@ -203,13 +196,11 @@ class SurveyModule(BaseModule):
                 self.log_info("새로운 팝업 창에서 설문참여 버튼을 찾는 중...")
                 
                 # 🔥 새로운 팝업 창에서 설문참여 버튼 자동 클릭
-                self.auto_click_survey_in_popup()
-                
-                return True
+                return self.auto_click_survey_in_popup()
                 
             except TimeoutException:
                 # 재입장하기 버튼이 없는 경우 (이미 설문 완료)
-                self.log_warning("재입장하기 버튼이 없습니다. 이미 설문이 완료되었거나 참여할 설문이 없습니다.")
+                self.log_info("재입장하기 버튼이 없습니다. 이미 설문이 완료되었거나 참여할 설문이 없습니다.")
                 return False
                 
         except Exception as e:
@@ -245,16 +236,8 @@ class SurveyModule(BaseModule):
             self.log_info("팝업 창으로 전환 완료")
             self.log_info("설문참여 버튼 검색 중...")
             
-            # 페이지 로딩 대기 (설문참여 버튼이 나타날 때까지)
-            self.web_automation.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "#surveyEnter"))
-            )
-            
-            # 설문참여 버튼 찾기
-            survey_button = self.web_automation.driver.find_element(
-                By.CSS_SELECTOR, 
-                "#surveyEnter"
-            )
+            # 설문참여 버튼 찾기 (안전하게)
+            survey_button = self.find_element_safe(By.CSS_SELECTOR, "#surveyEnter")
             
             self.log_info("설문참여 버튼 발견")
             
@@ -265,12 +248,22 @@ class SurveyModule(BaseModule):
             self.log_info("개인정보 동의 팝업에서 설문하기 버튼을 찾는 중...")
             
             # 🔥 개인정보 동의 팝업에서 설문하기 버튼 자동 클릭
-            self.auto_click_survey_button_in_agree_popup()
+            result = self.auto_click_survey_button_in_agree_popup()
             
+            # 작업을 마친 팝업 창(VOD/설문진입창) 닫기
+            try:
+                self.web_automation.driver.close()
+                self.log_info("🧹 현재 팝업 창을 닫았습니다.")
+            except:
+                pass
+
             # 원래 창으로 돌아가기
-            self.web_automation.driver.switch_to.window(original_window)
+            try:
+                self.web_automation.driver.switch_to.window(original_window)
+            except:
+                pass
             
-            return True
+            return result
             
         except Exception as e:
             self.log_error(f"팝업 창에서 설문참여 버튼 클릭 실패: {str(e)}")
@@ -298,10 +291,7 @@ class SurveyModule(BaseModule):
             
             # 동의 체크박스 자동 체크
             try:
-                agree_checkbox = self.web_automation.driver.find_element(
-                    By.CSS_SELECTOR, 
-                    "#agreeInfo #agree"
-                )
+                agree_checkbox = self.find_element_safe(By.CSS_SELECTOR, "#agreeInfo #agree")
                 
                 # 체크박스가 체크되지 않은 경우에만 체크
                 if not agree_checkbox.is_selected():
@@ -316,16 +306,8 @@ class SurveyModule(BaseModule):
             # 설문하기 버튼 찾기 및 클릭
             self.log_info("설문하기 버튼 검색 중...")
             
-            # 페이지 로딩 대기 (설문하기 버튼이 나타날 때까지)
-            self.web_automation.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "#agreeInfo .btn_answer"))
-            )
-            
-            # 설문하기 버튼 찾기
-            survey_button = self.web_automation.driver.find_element(
-                By.CSS_SELECTOR, 
-                "#agreeInfo .btn_answer"
-            )
+            # 설문하기 버튼 찾기 (안전하게)
+            survey_button = self.find_element_safe(By.CSS_SELECTOR, "#agreeInfo .btn_answer")
             
             self.log_info("설문하기 버튼 발견")
             
@@ -337,9 +319,7 @@ class SurveyModule(BaseModule):
             self.log_info("새로운 설문 창에서 자동 답변을 시작합니다...")
             
             # 🔥 새로운 설문 창에서 자동 답변 및 제출
-            self.auto_fill_and_submit_survey()
-            
-            return True
+            return self.auto_fill_and_submit_survey()
             
         except Exception as e:
             self.log_error(f"개인정보 동의 팝업에서 설문하기 버튼 클릭 실패: {str(e)}")
@@ -378,9 +358,7 @@ class SurveyModule(BaseModule):
             self.log_info("설문 페이지 로딩 대기 중...")
             
             # 설문 페이지 로딩 완료 대기
-            self.web_automation.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "form[id^='surveyForm']"))
-            )
+            self.find_element_safe(By.CSS_SELECTOR, "form[id^='surveyForm']")
             
             self.log_info("설문 페이지 로딩 완료")
             self.log_info("여러 페이지 설문 처리 시작...")
@@ -414,7 +392,7 @@ class SurveyModule(BaseModule):
                 
                 # 페이지 하단 버튼 확인
                 try:
-                    footer_button = self.web_automation.driver.find_element(
+                    footer_button = self.find_element_safe(
                         By.CSS_SELECTOR, 
                         'footer input[type="submit"][value="다음"], footer input[type="submit"][value="제출하기"]'
                     )
@@ -427,7 +405,6 @@ class SurveyModule(BaseModule):
                     if "다음" in button_text:
                         # 다음 버튼 클릭
                         self.log_info("다음 버튼 클릭, 다음 페이지로 이동...")
-                        
                         footer_button.click()
                         
                         # 다음 페이지 로딩 대기
@@ -435,10 +412,8 @@ class SurveyModule(BaseModule):
                         
                         # 다음 페이지에서 답변할 수 있도록 대기
                         try:
-                            self.web_automation.wait.until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, "form[id^='surveyForm']"))
-                            )
-                        except TimeoutException:
+                            self.find_element_safe(By.CSS_SELECTOR, "form[id^='surveyForm']", timeout=10)
+                        except Exception:
                             self.log_warning("다음 페이지 로딩 대기 시간 초과, 계속 진행...")
                         
                         page_count += 1
@@ -470,8 +445,18 @@ class SurveyModule(BaseModule):
             # 확인 팝업 처리
             self._handle_submit_confirmation_popup()
             
+            # 제출이 완료된 설문 창 닫기
+            try:
+                self.web_automation.driver.close()
+                self.log_info("🧹 제출이 완료된 설문 창을 닫았습니다.")
+            except:
+                pass
+
             # 원래 창으로 돌아가기
-            self.web_automation.driver.switch_to.window(original_window)
+            try:
+                self.web_automation.driver.switch_to.window(original_window)
+            except:
+                pass
             
             # 포인트 확인 모듈 실행은 상위로직(execute의 finally)에서 일괄 처리합니다.
             
@@ -495,13 +480,11 @@ class SurveyModule(BaseModule):
             
             # 팝업이 나타날 때까지 동적 대기
             try:
-                popup_container = self.web_automation.wait.until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "#headlessui-portal-root"))
-                )
+                popup_container = self.find_element_safe(By.CSS_SELECTOR, "#headlessui-portal-root", timeout=5)
                 
                 self.log_info("팝업 발견, 닫기 버튼 검색 중...")
                 
-                # 팝업 내부에 "닫기" 버튼이 있는지 확인 (XPath 사용)
+                # 팝업 내부에 "닫기" 버튼이 있는지 확인
                 try:
                     close_button = popup_container.find_element(
                         By.XPATH, 
@@ -596,58 +579,87 @@ class SurveyModule(BaseModule):
         try:
             missing_fields = []
             
+            # 설문 폼 요소 찾기 (범위 제한)
+            try:
+                form = self.web_automation.driver.find_element(By.CSS_SELECTOR, "form[id^='surveyForm']")
+            except:
+                # 폼을 찾을 수 없으면 전체 드라이버 사용
+                form = self.web_automation.driver
+
             # 1. 라디오 버튼 그룹별로 하나씩 선택되었는지 확인
-            radio_groups = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]')
+            radio_groups = form.find_elements(By.CSS_SELECTOR, 'input[type="radio"]')
             processed_groups = set()
             
             for radio in radio_groups:
-                name = radio.get_attribute('name')
-                if name and name not in processed_groups:
-                    # 해당 그룹에서 선택된 라디오 버튼이 있는지 확인
-                    try:
-                        selected_radio = self.web_automation.driver.find_element(
-                            By.CSS_SELECTOR, f'input[type="radio"][name="{name}"]:checked'
-                        )
-                    except:
-                        missing_fields.append(f"라디오 버튼 그룹 '{name}'")
-                    processed_groups.add(name)
+                try:
+                    # 보이지 않는 요소는 건너뜀 (다른 페이지 요소 등)
+                    if not radio.is_displayed():
+                        continue
+                        
+                    name = radio.get_attribute('name')
+                    if name and name not in processed_groups:
+                        # 해당 그룹에서 선택된 라디오 버튼이 있는지 확인
+                        try:
+                            # 폼 내에서 해당 이름의 체크된 라디오 버튼 검색
+                            checked_selector = f'input[type="radio"][name="{name}"]:checked'
+                            form.find_element(By.CSS_SELECTOR, checked_selector)
+                        except:
+                            missing_fields.append(f"라디오 버튼 그룹 '{name}'")
+                        processed_groups.add(name)
+                except Exception as ie:
+                    self.log_warning(f"라디오 버튼 확인 중 개별 오류: {str(ie)}")
             
             # 2. 텍스트 입력 필드가 비어있지 않은지 확인
-            text_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="text"]')
+            text_inputs = form.find_elements(By.CSS_SELECTOR, 'input[type="text"]')
             for i, text_input in enumerate(text_inputs):
-                if not text_input.get_attribute('value').strip():
-                    missing_fields.append(f"텍스트 입력 필드 {i+1}번")
+                try:
+                    if text_input.is_displayed() and not text_input.get_attribute('value').strip():
+                        missing_fields.append(f"텍스트 입력 필드 {i+1}번")
+                except:
+                    continue
             
             # 3. 이메일 필드가 유효한 이메일 형식인지 확인
-            email_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="email"]')
+            email_inputs = form.find_elements(By.CSS_SELECTOR, 'input[type="email"]')
             for i, email_input in enumerate(email_inputs):
-                email_value = email_input.get_attribute('value').strip()
-                if not email_value or '@' not in email_value:
-                    missing_fields.append(f"이메일 필드 {i+1}번")
+                try:
+                    if email_input.is_displayed():
+                        email_value = email_input.get_attribute('value').strip()
+                        if not email_value or '@' not in email_value:
+                            missing_fields.append(f"이메일 필드 {i+1}번")
+                except:
+                    continue
             
             # 4. textarea 필드가 비어있지 않은지 확인
-            textarea_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'textarea')
+            textarea_inputs = form.find_elements(By.CSS_SELECTOR, 'textarea')
             for i, textarea in enumerate(textarea_inputs):
-                if not textarea.get_attribute('value').strip():
-                    missing_fields.append(f"textarea 필드 {i+1}번")
+                try:
+                    if textarea.is_displayed() and not textarea.get_attribute('value').strip():
+                        missing_fields.append(f"textarea 필드 {i+1}번")
+                except:
+                    continue
             
-            # 5. 체크박스 필드가 최소 1개 이상 선택되었는지 확인
-            checkbox_inputs = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]')
-            if checkbox_inputs:
-                selected_checkboxes = self.web_automation.driver.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]:checked')
-                if not selected_checkboxes:
-                    missing_fields.append("체크박스")
+            # 5. 체크박스 필드가 최소 1개 이상 선택되었는지 확인 (보이는 것만)
+            checkboxes = form.find_elements(By.CSS_SELECTOR, 'input[type="checkbox"]')
+            visible_checkboxes = [cb for cb in checkboxes if cb.is_displayed()]
+            
+            if visible_checkboxes:
+                checked_visible = [cb for cb in visible_checkboxes if cb.is_selected()]
+                if not checked_visible:
+                    # 필수 항목인지 여부를 확인하기 어려우므로 경고만 하고 missing에는 추가하지 않음 (유연한 대응)
+                    self.log_warning("체크박스가 하나도 선택되지 않았습니다. (선택 항목일 수 있음)")
             
             if missing_fields:
                 self.log_error(f"채워지지 않은 필수 항목: {', '.join(missing_fields)}")
                 return False
             
             self.log_success("모든 필수 항목이 올바르게 채워졌습니다")
-            
             return True
             
         except Exception as e:
-            self.log_error(f"필수 항목 검증 중 오류: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            self.log_error(f"필수 항목 검증 중 오류: {type(e).__name__} - {str(e)}")
+            self.log_info(f"상세 오류 내역: {error_details.splitlines()[-1]}")
             return False
     
     def retry_fill_missing_fields(self):
@@ -734,6 +746,10 @@ class SurveyModule(BaseModule):
                         # sr-only나 readonly가 아닌 실제 클릭 가능한 체크박스 찾기
                         clickable_checkbox = None
                         for checkbox in checkbox_inputs:
+                            # 보이지 않는 것은 건너뜀
+                            if not checkbox.is_displayed():
+                                continue
+                                
                             # sr-only 클래스나 readonly 속성이 없는 체크박스 찾기
                             checkbox_class = checkbox.get_attribute('class') or ''
                             checkbox_readonly = checkbox.get_attribute('readonly')
@@ -742,9 +758,12 @@ class SurveyModule(BaseModule):
                                 clickable_checkbox = checkbox
                                 break
                         
-                        # 클릭 가능한 체크박스를 찾지 못한 경우, 두 번째 체크박스 시도
-                        if not clickable_checkbox and len(checkbox_inputs) >= 2:
-                            clickable_checkbox = checkbox_inputs[1]
+                        # 클릭 가능한 체크박스를 찾지 못한 경우, 첫 번째 보이는 것 시도
+                        if not clickable_checkbox:
+                            for cb in checkbox_inputs:
+                                if cb.is_displayed():
+                                    clickable_checkbox = cb
+                                    break
                         
                         if clickable_checkbox and not clickable_checkbox.is_selected():
                             clickable_checkbox.click()

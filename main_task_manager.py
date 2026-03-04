@@ -202,6 +202,7 @@ class TaskManager:
         self.state = TaskManagerState()  # 상태 관리 클래스 사용
         self.logger = logging.getLogger(__name__)
         self._module_cache = {}  # 모듈 클래스 캐시
+        self.browser_lock = threading.RLock()  # 브라우저 전역 잠금 (재진입 가능)
     
     def initialize_web_automation(self, gui_callbacks=None):
         """웹드라이버가 없으면 초기화"""
@@ -311,66 +312,65 @@ class TaskManager:
         )
     
     def execute_module_safely(self, module_class, module_name, gui_callbacks):
-        """모듈 실행 공통 로직"""
+        """모듈 실행 공통 로직 - 전역 브라우저 잠금 적용"""
         try:
             # 브라우저 확보 및 생존 확인
-            if module_name == "로그인":
-                web_auto = self.state.web_automation or self.initialize_web_automation(gui_callbacks)
-            else:
-                web_auto = self.ensure_web_automation_alive(gui_callbacks)
-                
-            if not web_auto:
-                self.log_error(module_name, "브라우저를 초기화할 수 없습니다.", gui_callbacks)
-                return
-
-            gui_logger = self.create_gui_logger(gui_callbacks)
-            
-            # 현재 모듈 상태 업데이트
-            self.state.current_module = module_name
-            
-            # 모듈 생성
-            module = module_class(web_auto, gui_logger)
-            
-            # BaseModule을 상속받은 모듈은 자동으로 set_callbacks 사용 가능
-            if isinstance(module, BaseModule):
-                module.set_callbacks(gui_callbacks)
-                # 새로운 콜백 방식을 위한 속성 설정
-                module.gui_callbacks = gui_callbacks
-                
-                # gui_instance가 있으면 모듈에 설정 (로그인과 대시보드 모듈)
-                if module_name in ["로그인", "대시보드"] and 'gui_instance' in gui_callbacks and gui_callbacks['gui_instance']:
-                    module.gui_instance = gui_callbacks['gui_instance']
+            with self.browser_lock:
+                if module_name == "로그인":
+                    web_auto = self.state.web_automation or self.initialize_web_automation(gui_callbacks)
+                else:
+                    web_auto = self.ensure_web_automation_alive(gui_callbacks)
                     
-            elif hasattr(module, 'set_callbacks'):
-                # 기존 방식 지원 (하위 호환성)
-                module.set_callbacks(gui_callbacks)
-                
-                # gui_instance가 있으면 모듈에 설정
-                if 'gui_instance' in gui_callbacks and gui_callbacks['gui_instance']:
-                    module.gui_instance = gui_callbacks['gui_instance']
-            
+                if not web_auto:
+                    self.log_error(module_name, "브라우저를 초기화할 수 없습니다.", gui_callbacks)
+                    return
 
-            
-            # 모듈 실행
-            result = module.execute()
-            
-            # 결과 해석 (딕셔너리 또는 불리언 대응)
-            is_success = False
-            message = ""
-            if isinstance(result, dict):
-                is_success = result.get('success', False)
-                message = result.get('message', '')
-                if message:
-                    self.logger.info(f"[{module_name}] {message}")
-            else:
-                is_success = bool(result)
-            
-            if is_success:
-                self.log_success(module_name, gui_callbacks, message)
-                self.handle_special_actions(module_name, 'success')
-            else:
-                self.log_failure(module_name, gui_callbacks, message)
-                self.handle_special_actions(module_name, 'failure')
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                
+                # 현재 모듈 상태 업데이트
+                self.state.current_module = module_name
+                
+                # 모듈 생성
+                module = module_class(web_auto, gui_logger)
+                
+                # BaseModule을 상속받은 모듈은 자동으로 set_callbacks 사용 가능
+                if isinstance(module, BaseModule):
+                    module.set_callbacks(gui_callbacks)
+                    # 새로운 콜백 방식을 위한 속성 설정
+                    module.gui_callbacks = gui_callbacks
+                    
+                    # gui_instance가 있으면 모듈에 설정 (로그인과 대시보드 모듈)
+                    if module_name in ["로그인", "대시보드"] and 'gui_instance' in gui_callbacks and gui_callbacks['gui_instance']:
+                        module.gui_instance = gui_callbacks['gui_instance']
+                        
+                elif hasattr(module, 'set_callbacks'):
+                    # 기존 방식 지원 (하위 호환성)
+                    module.set_callbacks(gui_callbacks)
+                    
+                    # gui_instance가 있으면 모듈에 설정
+                    if 'gui_instance' in gui_callbacks and gui_callbacks['gui_instance']:
+                        module.gui_instance = gui_callbacks['gui_instance']
+                
+                # 모듈 실행
+                result = module.execute()
+                
+                # 결과 해석 (딕셔너리 또는 불리언 대응)
+                is_success = False
+                message = ""
+                if isinstance(result, dict):
+                    is_success = result.get('success', False)
+                    message = result.get('message', '')
+                    if message:
+                        self.logger.info(f"[{module_name}] {message}")
+                else:
+                    is_success = bool(result)
+                
+                if is_success:
+                    self.log_success(module_name, gui_callbacks, message)
+                    self.handle_special_actions(module_name, 'success')
+                else:
+                    self.log_failure(module_name, gui_callbacks, message)
+                    self.handle_special_actions(module_name, 'failure')
                 
         except Exception as e:
             self.log_error(module_name, str(e), gui_callbacks)
@@ -479,33 +479,34 @@ class TaskManager:
 
         def _run():
             try:
-                web_auto = self.ensure_web_automation_alive(gui_callbacks)
-                if not web_auto: return
+                with self.browser_lock:
+                    web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                    if not web_auto: return
 
-                module_class = self.get_module_class('seminar')
-                gui_logger = self.create_gui_logger(gui_callbacks)
-                seminar = module_class(web_auto, gui_logger)
-                seminar.set_callbacks(gui_callbacks)
+                    module_class = self.get_module_class('seminar')
+                    gui_logger = self.create_gui_logger(gui_callbacks)
+                    seminar = module_class(web_auto, gui_logger)
+                    seminar.set_callbacks(gui_callbacks)
 
-                success_count = 0
-                for i, item in enumerate(checked_list, 1):
-                    title = item['title']
-                    gui_callbacks['log_message'](f"[{i}/{len(checked_list)}] {title} {action_type} 중...")
-                    
-                    status_to_send = '신청완료' if action_type == 'cancel' else '신청가능'
-                    result = seminar.handle_seminar_action(item['detail_link'], status_to_send)
-                    success = result.get('success', False) if isinstance(result, dict) else bool(result)
-                    
-                    if success:
-                        success_count += 1
-                        gui_callbacks['log_message'](f"✅ {title} 완료")
-                    else:
-                        msg = result.get('message', '실패') if isinstance(result, dict) else '실패'
-                        gui_callbacks['log_message'](f"❌ {title} {msg}")
-                    time.sleep(0.5)
+                    success_count = 0
+                    for i, item in enumerate(checked_list, 1):
+                        title = item['title']
+                        gui_callbacks['log_message'](f"[{i}/{len(checked_list)}] {title} {action_type} 중...")
+                        
+                        status_to_send = '신청완료' if action_type == 'cancel' else '신청가능'
+                        result = seminar.handle_seminar_action(item['detail_link'], status_to_send)
+                        success = result.get('success', False) if isinstance(result, dict) else bool(result)
+                        
+                        if success:
+                            success_count += 1
+                            gui_callbacks['log_message'](f"✅ {title} 완료")
+                        else:
+                            msg = result.get('message', '실패') if isinstance(result, dict) else '실패'
+                            gui_callbacks['log_message'](f"❌ {title} {msg}")
+                        time.sleep(0.5)
 
-                gui_callbacks['log_message'](f"🎉 일괄 처리 완료! 성공: {success_count}개")
-                self._handle_seminar_refresh(gui_callbacks)
+                    gui_callbacks['log_message'](f"🎉 일괄 처리 완료! 성공: {success_count}개")
+                    self._handle_seminar_refresh(gui_callbacks)
             except Exception as e:
                 gui_callbacks['log_error'](f"일괄 처리 중 오류: {str(e)}")
 
@@ -515,15 +516,16 @@ class TaskManager:
         """개별 세미나 액션 처리 (더블클릭)"""
         def _run():
             try:
-                web_auto = self.ensure_web_automation_alive(gui_callbacks)
-                if not web_auto: return
+                with self.browser_lock:
+                    web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                    if not web_auto: return
 
-                module_class = self.get_module_class('seminar')
-                gui_logger = self.create_gui_logger(gui_callbacks)
-                seminar = module_class(web_auto, gui_logger)
-                seminar.set_callbacks(gui_callbacks)
+                    module_class = self.get_module_class('seminar')
+                    gui_logger = self.create_gui_logger(gui_callbacks)
+                    seminar = module_class(web_auto, gui_logger)
+                    seminar.set_callbacks(gui_callbacks)
 
-                result = seminar.handle_seminar_action(link, status)
+                    result = seminar.handle_seminar_action(link, status)
                 success = result.get('success', False) if isinstance(result, dict) else bool(result)
                 if success:
                     gui_callbacks['log_message']("✅ 작업 완료")
@@ -541,85 +543,86 @@ class TaskManager:
         def _run():
             try:
                 self.state.current_module = 'seminar_refresh'
-                web_auto = self.ensure_web_automation_alive(gui_callbacks)
-                if not web_auto: return
+                with self.browser_lock:
+                    web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                    if not web_auto: return
 
-                module_class = self.get_module_class('seminar')
-                gui_logger = self.create_gui_logger(gui_callbacks)
-                seminar = module_class(web_auto, gui_logger)
-                seminar.set_callbacks(gui_callbacks)
-
-                gui_callbacks['log_message']("🔄 세미나 목록을 새로고침합니다...")
-                seminars_res = seminar.get_seminar_list()
-                
-                # 결과 목록 추출
-                current_seminars = seminars_res.get('data', []) if isinstance(seminars_res, dict) else seminars_res
-                current_titles = {s.get('title', '') for s in current_seminars if s.get('title')}
-
-                # [추가] 자동 설문 트리거 로직: 세미나 종료 감지
-                if settings and settings.get('auto_survey'):
-                    # 이전 목록이 있고 (첫 실행 제외), 이전에 있던 제목이 현재 없으면 종료로 간주
-                    if self.state._previous_seminar_titles:
-                        ended_seminars = self.state._previous_seminar_titles - current_titles
-                        if ended_seminars:
-                            self.logger.info(f"세미나 종료 감지: {ended_seminars}")
-                            gui_callbacks['log_message'](f"📢 세미나 종료 감지: {list(ended_seminars)[0]} 외 {len(ended_seminars)-1}건" if len(ended_seminars) > 1 else f"📢 세미나 종료 감지: {list(ended_seminars)[0]}")
-                            gui_callbacks['log_message']("📝 자동 설문참여를 시작합니다...")
-                            
-                            # 설문 모듈 실행 (별도 스레드에서 돌아가도록 위임)
-                            self.execute_survey(gui_callbacks)
-                
-                # [추가] 자동 세미나 입장 로직: 시작 시간 기반
-                if settings and settings.get('auto_seminar_enter'):
-                    try:
-                        delay_min = int(settings.get('seminar_enter_delay', 5))
-                    except:
-                        delay_min = 5
-                        
-                    now = datetime.now()
-                    today_str = f"{now.month}/{now.day}"
+                    module_class = self.get_module_class('seminar')
+                    gui_logger = self.create_gui_logger(gui_callbacks)
+                    seminar = module_class(web_auto, gui_logger)
+                    seminar.set_callbacks(gui_callbacks)
+    
+                    gui_callbacks['log_message']("🔄 세미나 목록을 새로고침합니다...")
+                    seminars_res = seminar.get_seminar_list()
                     
-                    # 입장 대상 수집
-                    targets = []
-                    for s in current_seminars:
-                        title = s.get('title', '')
-                        link = s.get('detail_link', '')
-                        time_str = s.get('time', '')
-                        date_str = s.get('date', '')
-                        
-                        from modules.utils import get_status_tag
-                        if date_str == today_str and get_status_tag(s.get('status', '')) == '입장하기' and link not in self.state._entered_seminar_links:
-                            try:
-                                start_time_part = time_str.split('~')[0].strip()
-                                start_h, start_m = map(int, start_time_part.split(':'))
-                                start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                    # 결과 목록 추출
+                    current_seminars = seminars_res.get('data', []) if isinstance(seminars_res, dict) else seminars_res
+                    current_titles = {s.get('title', '') for s in current_seminars if s.get('title')}
+    
+                    # [추가] 자동 설문 트리거 로직: 세미나 종료 감지
+                    if settings and settings.get('auto_survey'):
+                        # 이전 목록이 있고 (첫 실행 제외), 이전에 있던 제목이 현재 없으면 종료로 간주
+                        if self.state._previous_seminar_titles:
+                            ended_seminars = self.state._previous_seminar_titles - current_titles
+                            if ended_seminars:
+                                self.logger.info(f"세미나 종료 감지: {ended_seminars}")
+                                gui_callbacks['log_message'](f"📢 세미나 종료 감지: {list(ended_seminars)[0]} 외 {len(ended_seminars)-1}건" if len(ended_seminars) > 1 else f"📢 세미나 종료 감지: {list(ended_seminars)[0]}")
+                                gui_callbacks['log_message']("📝 자동 설문참여를 시작합니다...")
                                 
-                                from datetime import timedelta
-                                enter_time = start_dt + timedelta(minutes=delay_min)
-                                
-                                # 1. 예약된 시간이 지났고
-                                # 2. 그 예약 시각이 '프로그램 시작 시각' 이후인 경우에만 실행 (재시작 시 중복 방지)
-                                if now >= enter_time and enter_time >= self.state.startup_time:
-                                    targets.append((link, title))
-                                    self.state._entered_seminar_links.add(link) # 중복 방지
-                            except: continue
-
-                    # 수집된 대상이 있으면 순차적으로 실행
-                    if targets:
-                        def _sequential_enter(entry_list):
-                            for link, title in entry_list:
-                                gui_callbacks['log_message'](f"🚪 세미나 자동 입장을 시작합니다: {title}")
-                                self.auto_enter_seminar(link, title, gui_callbacks)
-                                time.sleep(5) # 브라우저 안정화를 위해 5초 대기 후 다음 입장 진행
+                                # 설문 모듈 실행 (별도 스레드에서 돌아가도록 위임)
+                                self.execute_survey(gui_callbacks)
+                    
+                    # [추가] 자동 세미나 입장 로직: 시작 시간 기반
+                    if settings and settings.get('auto_seminar_enter'):
+                        try:
+                            delay_min = int(settings.get('seminar_enter_delay', 5))
+                        except:
+                            delay_min = 5
+                            
+                        now = datetime.now()
+                        today_str = f"{now.month}/{now.day}"
                         
-                        threading.Thread(target=_sequential_enter, args=(targets,), daemon=True).start()
-
-                # 이전 목록 갱신 (설정 여부와 상관없이 항상 최신 상태 유지)
-                self.state._previous_seminar_titles = current_titles
-
-                if 'update_seminar_dialog' in gui_callbacks:
-                    gui_callbacks['update_seminar_dialog'](current_seminars)
-                
+                        # 입장 대상 수집
+                        targets = []
+                        for s in current_seminars:
+                            title = s.get('title', '')
+                            link = s.get('detail_link', '')
+                            time_str = s.get('time', '')
+                            date_str = s.get('date', '')
+                            
+                            from modules.utils import get_status_tag
+                            if date_str == today_str and get_status_tag(s.get('status', '')) == '입장하기' and link not in self.state._entered_seminar_links:
+                                try:
+                                    start_time_part = time_str.split('~')[0].strip()
+                                    start_h, start_m = map(int, start_time_part.split(':'))
+                                    start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                                    
+                                    from datetime import timedelta
+                                    enter_time = start_dt + timedelta(minutes=delay_min)
+                                    
+                                    # 1. 예약된 시간이 지났고
+                                    # 2. 그 예약 시각이 '프로그램 시작 시각' 이후인 경우에만 실행 (재시작 시 중복 방지)
+                                    if now >= enter_time and enter_time >= self.state.startup_time:
+                                        targets.append((link, title))
+                                        self.state._entered_seminar_links.add(link) # 중복 방지
+                                except: continue
+    
+                        # 수집된 대상이 있으면 순차적으로 실행
+                        if targets:
+                            def _sequential_enter(entry_list):
+                                for link, title in entry_list:
+                                    gui_callbacks['log_message'](f"🚪 세미나 자동 입장을 시작합니다: {title}")
+                                    self.auto_enter_seminar(link, title, gui_callbacks)
+                                    time.sleep(5) # 브라우저 안정화를 위해 5초 대기 후 다음 입장 진행
+                            
+                            threading.Thread(target=_sequential_enter, args=(targets,), daemon=True).start()
+    
+                    # 이전 목록 갱신 (설정 여부와 상관없이 항상 최신 상태 유지)
+                    self.state._previous_seminar_titles = current_titles
+    
+                    if 'update_seminar_dialog' in gui_callbacks:
+                        gui_callbacks['update_seminar_dialog'](current_seminars)
+                    
             except Exception as e:
                 gui_callbacks['log_error'](f"새로고침 중 오류: {str(e)}")
             finally:
@@ -633,18 +636,19 @@ class TaskManager:
         def _run():
             try:
                 self.state.current_module = 'seminar_auto_apply'
-                web_auto = self.ensure_web_automation_alive(gui_callbacks)
-                if not web_auto: return
+                with self.browser_lock:
+                    web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                    if not web_auto: return
 
-                module_class = self.get_module_class('seminar')
-                gui_logger = self.create_gui_logger(gui_callbacks)
-                seminar = module_class(web_auto, gui_logger)
-                seminar.set_callbacks(gui_callbacks)
-
-                result = seminar.auto_apply_available_seminars()
-                count = result.get('data', {}).get('count', 0) if isinstance(result, dict) else 0
-                if count > 0:
-                    gui_callbacks['log_message'](f"✅ 자동 세미나 신청 완료: {count}개")
+                    module_class = self.get_module_class('seminar')
+                    gui_logger = self.create_gui_logger(gui_callbacks)
+                    seminar = module_class(web_auto, gui_logger)
+                    seminar.set_callbacks(gui_callbacks)
+    
+                    result = seminar.auto_apply_available_seminars()
+                    count = result.get('data', {}).get('count', 0) if isinstance(result, dict) else 0
+                    if count > 0:
+                        gui_callbacks['log_message'](f"✅ 자동 세미나 신청 완료: {count}개")
             except Exception as e:
                 self.logger.error(f"자동 세미나 신청 오류: {str(e)}")
             finally:
@@ -657,34 +661,35 @@ class TaskManager:
         """배민 쿠폰 구매를 위한 초기 정보(포인트, 번호)를 가져옵니다."""
         try:
             self.state.current_module = 'baemin'
-            web_auto = self.ensure_web_automation_alive(gui_callbacks)
-            if not web_auto: return {'points': 0, 'max_coupons': 0, 'phone': ''}
+            with self.browser_lock:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return {'points': 0, 'max_coupons': 0, 'phone': ''}
 
-            module_class = self.get_module_class('baemin')
-            gui_logger = self.create_gui_logger(gui_callbacks)
-            
-            baemin = module_class(web_auto, gui_logger)
-            baemin.set_callbacks(gui_callbacks)
-            
-            points_res = baemin.get_current_points()
-            if isinstance(points_res, dict):
-                points = points_res.get('data', 0)
-            else:
-                points = points_res
+                module_class = self.get_module_class('baemin')
+                gui_logger = self.create_gui_logger(gui_callbacks)
                 
-            max_coupons = baemin.calculate_max_coupons(points)
-            
-            phone_res = baemin.get_phone_number()
-            if isinstance(phone_res, dict):
-                phone = phone_res.get('data', '')
-            else:
-                phone = phone_res or ''
-            
-            return {
-                'points': points,
-                'max_coupons': max_coupons,
-                'phone': phone
-            }
+                baemin = module_class(web_auto, gui_logger)
+                baemin.set_callbacks(gui_callbacks)
+                
+                points_res = baemin.get_current_points()
+                if isinstance(points_res, dict):
+                    points = points_res.get('data', 0)
+                else:
+                    points = points_res
+                    
+                max_coupons = baemin.calculate_max_coupons(points)
+                
+                phone_res = baemin.get_phone_number()
+                if isinstance(phone_res, dict):
+                    phone = phone_res.get('data', '')
+                else:
+                    phone = phone_res or ''
+                
+                return {
+                    'points': points,
+                    'max_coupons': max_coupons,
+                    'phone': phone
+                }
         except Exception as e:
             self.logger.error(f"배민 정보 조회 오류: {str(e)}")
             raise
@@ -696,29 +701,30 @@ class TaskManager:
         def _run():
             try:
                 self.state.current_module = 'baemin'
-                web_auto = self.ensure_web_automation_alive(gui_callbacks)
-                if not web_auto: return
+                with self.browser_lock:
+                    web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                    if not web_auto: return
 
-                module_class = self.get_module_class('baemin')
-                gui_logger = self.create_gui_logger(gui_callbacks)
-                
-                baemin = module_class(web_auto, gui_logger)
-                baemin.set_callbacks(gui_callbacks)
-                
-                result = baemin.execute(quantity=quantity, phone_number=phone)
-                
-                is_success = False
-                message = ""
-                if isinstance(result, dict):
-                    is_success = result.get('success', False)
-                    message = result.get('message', '')
-                else:
-                    is_success = bool(result)
+                    module_class = self.get_module_class('baemin')
+                    gui_logger = self.create_gui_logger(gui_callbacks)
                     
-                if is_success:
-                    self.log_success("배민 쿠폰 구매", gui_callbacks, message)
-                else:
-                    self.log_failure("배민 쿠폰 구매", gui_callbacks, message)
+                    baemin = module_class(web_auto, gui_logger)
+                    baemin.set_callbacks(gui_callbacks)
+                    
+                    result = baemin.execute(quantity=quantity, phone_number=phone)
+                    
+                    is_success = False
+                    message = ""
+                    if isinstance(result, dict):
+                        is_success = result.get('success', False)
+                        message = result.get('message', '')
+                    else:
+                        is_success = bool(result)
+                        
+                    if is_success:
+                        self.log_success("배민 쿠폰 구매", gui_callbacks, message)
+                    else:
+                        self.log_failure("배민 쿠폰 구매", gui_callbacks, message)
             except Exception as e:
                 self.log_error("배민 쿠폰 구매", str(e), gui_callbacks)
             finally:
@@ -730,19 +736,20 @@ class TaskManager:
         """최신 세미나 목록을 수집하여 반환합니다."""
         try:
             self.state.current_module = 'seminar_collect'
-            web_auto = self.ensure_web_automation_alive(gui_callbacks)
-            if not web_auto: return []
+            with self.browser_lock:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return []
 
-            module_class = self.get_module_class('seminar')
-            gui_logger = self.create_gui_logger(gui_callbacks)
-            
-            seminar = module_class(web_auto, gui_logger)
-            seminar.set_callbacks(gui_callbacks)
-            
-            result = seminar.collect_seminar_info_only()
-            if isinstance(result, dict):
-                return result.get('data', [])
-            return result
+                module_class = self.get_module_class('seminar')
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+                
+                result = seminar.collect_seminar_info_only()
+                if isinstance(result, dict):
+                    return result.get('data', [])
+                return result
         except Exception as e:
             self.logger.error(f"세미나 목록 수집 오류: {str(e)}")
             return []
@@ -753,21 +760,22 @@ class TaskManager:
         """세미나 자동 신청 및 목록 새로고침을 수행합니다."""
         try:
             # 이 작업은 백그라운드 스레드에서 실행되므로 직접 클래스 생성
-            web_auto = self.ensure_web_automation_alive(gui_callbacks)
-            if not web_auto: return 0, []
+            with self.browser_lock:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return 0, []
 
-            module_class = self.get_module_class('seminar')
-            gui_logger = self.create_gui_logger(gui_callbacks)
-            
-            seminar = module_class(web_auto, gui_logger)
-            seminar.set_callbacks(gui_callbacks)
-            
-            result = seminar.auto_apply_available_seminars()
-            # auto_apply_available_seminars가 튜플 (count, list)을 반환하는지, dict를 반환하는지 처리
-            if isinstance(result, dict):
-                data = result.get('data', {})
-                return data.get('count', 0), data.get('seminars', [])
-            return result
+                module_class = self.get_module_class('seminar')
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+                
+                result = seminar.auto_apply_available_seminars()
+                # auto_apply_available_seminars가 튜플 (count, list)을 반환하는지, dict를 반환하는지 처리
+                if isinstance(result, dict):
+                    data = result.get('data', {})
+                    return data.get('count', 0), data.get('seminars', [])
+                return result
         except Exception as e:
             self.logger.error(f"세미나 자동 신청/새로고침 오류: {str(e)}")
             return 0, []
@@ -776,27 +784,28 @@ class TaskManager:
         """특정 세미나에 자동으로 입장합니다."""
         try:
             self.state.current_module = 'auto_enter'
-            web_auto = self.ensure_web_automation_alive(gui_callbacks)
-            if not web_auto: return False
+            with self.browser_lock:
+                web_auto = self.ensure_web_automation_alive(gui_callbacks)
+                if not web_auto: return False
 
-            module_class = self.get_module_class('seminar')
-            gui_logger = self.create_gui_logger(gui_callbacks)
-            
-            # 상대 경로 처리
-            full_link = link
-            if link.startswith('/'):
-                full_link = "https://www.doctorville.co.kr" + link
-            
-            web_auto.driver.get(full_link)
-            time.sleep(2)
-            
-            seminar = module_class(web_auto, gui_logger)
-            seminar.set_callbacks(gui_callbacks)
-            
-            result = seminar.enter_seminar()
-            if isinstance(result, dict):
-                return result.get('success', False)
-            return bool(result)
+                module_class = self.get_module_class('seminar')
+                gui_logger = self.create_gui_logger(gui_callbacks)
+                
+                # 상대 경로 처리
+                full_link = link
+                if link.startswith('/'):
+                    full_link = "https://www.doctorville.co.kr" + link
+                
+                web_auto.driver.get(full_link)
+                time.sleep(2)
+                
+                seminar = module_class(web_auto, gui_logger)
+                seminar.set_callbacks(gui_callbacks)
+                
+                result = seminar.enter_seminar()
+                if isinstance(result, dict):
+                    return result.get('success', False)
+                return bool(result)
         except Exception as e:
             self.logger.error(f"세미나 자동 입장 오류: {str(e)}")
             return False

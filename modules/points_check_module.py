@@ -132,6 +132,11 @@ class PointsCheckModule(BaseModule):
             self.log_error(error_msg)
             return self.create_result(False, error_msg)
     
+            # 1단계: 메인 페이지에서 사용자 이름만 수집
+            user_name = self._get_user_name_from_main()
+            
+            # ... 
+
     def _get_user_name_from_main(self):
         """메인 페이지에서 사용자 이름만 수집"""
         try:
@@ -140,11 +145,8 @@ class PointsCheckModule(BaseModule):
             # 메인 페이지로 이동
             self.web_automation.driver.get(MAIN_PAGE_URL)
             
-            # 페이지 로딩 대기
-            self.web_automation.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, USER_INFO_SELECTOR)))
-            
-            # 사용자 이름 추출
-            user_info_element = self.web_automation.driver.find_element(By.CSS_SELECTOR, USER_INFO_SELECTOR)
+            # 사용자 이름 추출 (안전하게)
+            user_info_element = self.find_element_safe(By.CSS_SELECTOR, USER_INFO_SELECTOR)
             user_name_element = user_info_element.find_element(By.CSS_SELECTOR, USER_NAME_SELECTOR)
             user_name = user_name_element.text.strip()
             
@@ -168,11 +170,11 @@ class PointsCheckModule(BaseModule):
             
             # 포인트 페이지로 이동
             self.web_automation.driver.get(POINTS_PAGE_URL)
-            self.web_automation.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, POINTS_BOX_SELECTOR)))
+            self.find_element_safe(By.CSS_SELECTOR, POINTS_BOX_SELECTOR)
             
             # 포인트 정보 수집
             try:
-                points_element = self.web_automation.driver.find_element(By.CSS_SELECTOR, POINTS_VALUE_SELECTOR)
+                points_element = self.find_element_safe(By.CSS_SELECTOR, POINTS_VALUE_SELECTOR)
                 current_points = points_element.text.strip()
                 self.log_info(f"현재 포인트: {current_points}P")
             except NoSuchElementException:
@@ -201,7 +203,7 @@ class PointsCheckModule(BaseModule):
     def _check_today_activity(self, activity_type_key, today):
         """오늘 활동 여부 확인"""
         try:
-            rows = self.web_automation.driver.find_elements(By.CSS_SELECTOR, POINT_HISTORY_ROWS_SELECTOR)
+            rows = self.find_elements_safe(By.CSS_SELECTOR, POINT_HISTORY_ROWS_SELECTOR)
             
             for row in rows:
                 try:
