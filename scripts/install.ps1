@@ -69,9 +69,10 @@ Write-Host ""
 Write-Host "Setting up account information..." -ForegroundColor Cyan
 Write-Host ""
 
-$accountName = Read-Host "Enter ACCOUNT_NAME (e.g. your name. Only English and numbers recommended)"
-$accountUsername = Read-Host "Enter ACCOUNT_USERNAME (your email)"
-$accountPassword = Read-Host "Enter ACCOUNT_PASSWORD (your password)" -AsSecureString
+$accountName = Read-Host "계정 별칭을 입력하세요 (예: 계정1, 홍길동 - 파일명 앞에 붙을 이름입니다. 한글 가능)"
+if ([string]::IsNullOrWhiteSpace($accountName)) { $accountName = "Account1" }
+$accountUsername = Read-Host "닥터빌 로그인 이메일(ID)을 입력하세요"
+$accountPassword = Read-Host "닥터빌 로그인 비밀번호를 입력하세요" -AsSecureString
 $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToCoTaskMemUnicode($accountPassword))
 
 # Create account batch file
@@ -89,8 +90,8 @@ catch {
 }
 
 Write-Host ""
-Write-Host "Setup complete!" -ForegroundColor Green
-Write-Host "Run: account.bat to start the program" -ForegroundColor Cyan
+Write-Host "설정이 완료되었습니다!" -ForegroundColor Green
+Write-Host "실행 방법: '$batFileName' 파일을 더블클릭하여 프로그램을 시작하세요." -ForegroundColor Cyan
 Write-Host ""
 Read-Host "Press Enter"
 

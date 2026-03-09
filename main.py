@@ -5,6 +5,9 @@ import os
 import threading
 import logging
 import time
+import pystray
+from pystray import MenuItem as item
+from PIL import Image
 
 from main_task_manager import TaskManager
 from ui.main_window import MainWindow
@@ -16,9 +19,15 @@ class DoctorBillApp:
     def __init__(self, root):
         self.root = root
         
-        # 모든 계정이 공통 설정을 공유하도록 settings.json으로 고정 (절대 경로 사용)
+        # 공통 설정 및 사용자 정보 상태 관리
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.settings_file = os.path.join(base_dir, "data", "settings.json")
+        self.user_info = {
+            'name': '로그인 대기',
+            'points': '0 P',
+            'attendance': '대기',
+            'quiz': '대기'
+        }
         
         self.default_settings = {
             'auto_attendance': True,
@@ -50,8 +59,10 @@ class DoctorBillApp:
         # 4. 로깅 설정 (내부 로거를 UI 창으로 연결)
         self.setup_logging()
         
-        # 5. 초기 작업 스케줄링
+        # 5. 초기 작업 스케줄링 및 트레이 설정
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.setup_tray_icon()
+        
         self.root.after(200, self.auto_login)
         self.root.after(1000, self.check_scheduled_tasks)
 
@@ -101,6 +112,7 @@ class DoctorBillApp:
             'on_quiz_problem': self.on_quiz_problem,
             'on_baemin_purchase': self.on_baemin_purchase,
             'on_settings': self.open_settings,
+            'on_hide_to_tray': self.hide_window,
             'on_exit': self.on_closing,
             'on_seminar_refresh_toggle': self.on_seminar_refresh_toggle,
             'on_seminar_double_click': self.on_seminar_double_click,
@@ -246,11 +258,83 @@ class DoctorBillApp:
 
         SettingsDialog(self.root, self.get_setting, on_save, on_close)
 
-    def on_closing(self):
+    # ================= Tray Icon & Window Control =================
+    def setup_tray_icon(self):
+        """시스템 트레이 아이콘을 설정하고 별도 스레드에서 실행합니다."""
+        try:
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "icon.png")
+            image = Image.open(icon_path) if os.path.exists(icon_path) else Image.new('RGB', (64, 64), color=(39, 174, 96))
+            
+            account_name = os.environ.get('ACCOUNT_NAME', '')
+            title_text = f"닥터빌 자동화 [{account_name}]" if account_name else "닥터빌 자동화"
+            
+            # 1. 초기 메뉴 구성 (정보 포함)
+            name_info = f"👤 {self.user_info['name']} ({self.user_info['points']})"
+            status_info = f"✅ 출석: {self.user_info['attendance']} | 🧠 퀴즈: {self.user_info['quiz']}"
+            
+            menu_content = pystray.Menu(
+                item(name_info, lambda: None, enabled=False),
+                item(status_info, lambda: None, enabled=False),
+                pystray.Menu.SEPARATOR,
+                item('🔓 열기', lambda icon, item: self.root.after(0, self.show_window), default=True),
+                item('⚙️ 설정', lambda icon, item: self.root.after(0, self.open_settings)),
+                pystray.Menu.SEPARATOR,
+                item('❌ 완전 종료', lambda icon, item: self.root.after(0, self.on_closing))
+            )
+            
+            # 2. 아이콘 객체 생성 및 스레드 시작
+            self.tray_icon = pystray.Icon("doctor_ville_auto", image, title_text, menu_content)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            
+        except Exception as e:
+            self.log_message(f"⚠ 트레이 아이콘 생성 실패: {e}")
+
+    def refresh_tray_menu(self):
+        """사용자 정보를 포함하여 트레이 메뉴를 최신화합니다."""
+        if not hasattr(self, 'tray_icon'):
+            return
+
+        # 정보 메뉴 텍스트 재구성 (enabled=True로 설정하여 회색 현상 해결)
+        name_info = f"👤 {self.user_info['name']} ({self.user_info['points']})"
+        status_info = f"✅ 출석: {self.user_info['attendance']} | 🧠 퀴즈: {self.user_info['quiz']}"
+        
+        menu_content = pystray.Menu(
+            item(name_info, lambda: None), # 클릭 동작 없음 (정보 열람용)
+            item(status_info, lambda: None),
+            pystray.Menu.SEPARATOR,
+            item('🔓 열기', lambda icon, item: self.root.after(0, self.show_window), default=True),
+            item('⚙️ 설정', lambda icon, item: self.root.after(0, self.open_settings)),
+            pystray.Menu.SEPARATOR,
+            item('❌ 완전 종료', lambda icon, item: self.root.after(0, self.on_closing))
+        )
+        self.tray_icon.menu = menu_content
+
+    def hide_window(self):
+        """창을 숨기고 트레이로 최소화한 것처럼 보이게 합니다."""
+        self.root.withdraw()
+        if hasattr(self, 'tray_icon'):
+            # 현재 상태를 다시 한번 메뉴에 반영
+            self.refresh_tray_menu()
+            self.tray_icon.notify("프로그램이 시스템 트레이로 최소화되었습니다.", "알림")
+
+    def show_window(self, icon=None, item=None):
+        """트레이에서 창을 다시 화면으로 불러옵니다."""
+        self.root.after(0, self.root.deiconify)
+        self.root.after(0, self.root.lift)
+        self.root.after(0, lambda: self.root.state('normal'))
+
+    def on_closing(self, icon=None, item=None):
         self.log_message("프로그램을 종료합니다...")
         
         # 1. 화면 창을 즉시 숨깁니다 (사용자 입장에서는 꺼진 것처럼 보임)
         self.root.withdraw()
+        
+        # 트레이 아이콘이 있으면 종료
+        if hasattr(self, 'tray_icon'):
+            try:
+                self.tray_icon.stop()
+            except:
+                pass
         
         # 2. 백그라운드에서 크롬을 안전하게 끄고 완전히 프로세스를 종료합니다
         def fast_exit():
@@ -271,10 +355,19 @@ class DoctorBillApp:
         self.root.after(0, lambda: self.ui.update_status(status))
 
     def gui_update_user_info(self, user_name=None, account_type=None):
+        if user_name:
+            self.user_info['name'] = user_name
         self.root.after(0, lambda: self.ui.dashboard.update_user_info(user_name, account_type))
+        self.root.after(0, self.refresh_tray_menu)
 
     def gui_update_display(self, display_type, value):
+        # 작업 매니저에서 오는 다양한 키 값을 인지하도록 보강
+        if display_type in ['points', 'user_points']: self.user_info['points'] = value
+        elif display_type in ['attendance', 'attendance_status']: self.user_info['attendance'] = value
+        elif display_type in ['quiz', 'quiz_status']: self.user_info['quiz'] = value
+        
         self.root.after(0, lambda: self.ui.dashboard.update_display(display_type, value))
+        self.root.after(0, self.refresh_tray_menu)
 
     def log_and_update_status(self, log_msg, status_msg):
         self.log_message(log_msg)

@@ -23,8 +23,14 @@ class SettingsDialog:
         
         self.settings_window.configure(bg='#f0f0f0')
         self.settings_window.resizable(True, True)
-        self.settings_window.transient(parent)
+        
+        # 부모 창이 보일 때만 transient로 묶어줍니다 (트레이에 있을 때는 독립적으로 띄움)
+        if parent.state() != 'withdrawn':
+            self.settings_window.transient(parent)
+        
         self.settings_window.grab_set()
+        self.settings_window.lift()
+        self.settings_window.focus_force()
         
         self._setup_ui()
         

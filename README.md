@@ -126,12 +126,8 @@ python -m pip install -r requirements.txt
 | `selenium` | 웹 브라우저 자동화 |
 | `webdriver-manager` | ChromeDriver 자동 관리 |
 | `requests` | HTTP 요청 (업데이트 다운로드 등) |
-| `beautifulsoup4` | HTML 파싱 |
-| `openai` | OpenAI API (퀴즈 정답 검색) |
-| `anthropic` | Anthropic API (퀴즈 정답 검색) |
-| `PyPDF2` | PDF 파일 처리 |
-| `PyMuPDF` | PDF 파일 처리 (고급) |
-| `Pillow` | 이미지 처리 |
+| `Pillow` | 이미지 처리 (퀴즈/설문 힌트 표시) |
+| `pystray` | 시스템 트레이 아이콘 관리 |
 
 ## 프로젝트 구조
 

@@ -96,7 +96,7 @@ class DoctorBillUpdater:
         self.github_download = "https://github.com/skybluesunset95/DVA/archive/main.zip"
         
         # 보존할 파일 확장자들
-        self.preserve_extensions = ['.bat', '.exe', '.ini', '.log', '.json', '.txt']
+        self.preserve_extensions = ['.bat', '.exe', '.ini', '.log', '.json']
         
         # 시작 시 기존 백업 폴더 정리 (오류 발생해도 무시)
         self._cleanup_backup_initial()
@@ -111,7 +111,9 @@ class DoctorBillUpdater:
             'docs/',
             'data/',
             'scripts/',
-            'README.md'
+            'README.md',
+            'chromedriver.exe',
+            '.gitignore'
         ]
     
     def print_status(self, message):
@@ -301,6 +303,20 @@ class DoctorBillUpdater:
             self.print_status(f"복원 실패: {e}")
             return False
     
+    def run_pip_install(self):
+        """배경에서 pip install 실행"""
+        self.print_status("필요한 패키지를 확인하고 설치 중입니다 (약 10~20초)...")
+        import subprocess
+        try:
+            requirements_path = self.current_dir / "scripts" / "requirements.txt"
+            if requirements_path.exists():
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(requirements_path), "--quiet", "--disable-pip-version-check"])
+                self.print_status("패키지 설치 완료")
+            else:
+                self.print_status("requirements.txt 파일을 찾을 수 없어 패키지 설치를 건너뜁니다.")
+        except Exception as e:
+            self.print_status(f"패키지 설치 중 오류 (수동 설치 필요): {e}")
+
     def cleanup(self):
         """임시 파일들 정리"""
         self.safe_remove_tree(self.backup_dir)
@@ -322,6 +338,9 @@ class DoctorBillUpdater:
             success = self.extract_and_update(zip_path)
             
             if success:
+                # 4. 의존성 패키지 업데이트
+                self.run_pip_install()
+                
                 self.print_status("업데이트가 성공적으로 완료되었습니다!")
                 self.print_status("백업 파일은 5초 후 자동으로 삭제됩니다...")
                 

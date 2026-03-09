@@ -64,6 +64,24 @@ class MainWindow:
         )
         self.settings_button.pack(side='right', padx=(10, 0))
         
+        self.tray_button = tk.Button(
+            self.title_frame,
+            text="📥",
+            font=("맑은 고딕", 12),
+            bg='#3498db',
+            fg='white',
+            activebackground='#2980b9',
+            activeforeground='white',
+            borderwidth=0,
+            relief='flat',
+            cursor='hand2',
+            width=3,
+            height=1,
+            command=self.callbacks.get('on_hide_to_tray', lambda: None)
+        )
+        self.tray_button.pack(side='right', padx=(10, 0))
+        ToolTip(self.tray_button, "시스템 트레이로 최소화 (백그라운드 실행)", delay=500)
+        
         # 2. 사용자 정보 대시보드 (컴포넌트 사용)
         self.info_panel = tk.Frame(self.main_frame, bg='#ffffff', relief='solid', borderwidth=1)
         self.info_panel.grid(row=2, column=0, sticky='ew', pady=(0, 20), padx=10)
