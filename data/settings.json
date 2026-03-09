@@ -1,0 +1,17 @@
+{
+  "auto_attendance": true,
+  "auto_attendance_hour": 9,
+  "auto_attendance_min": 5,
+  "auto_quiz": true,
+  "auto_quiz_hour": 9,
+  "auto_quiz_min": 7,
+  "auto_survey": true,
+  "auto_seminar_refresh": true,
+  "auto_seminar_join": true,
+  "auto_seminar_enter": true,
+  "seminar_enter_delay": 1,
+  "seminar_refresh_interval": 60,
+  "browser_headless": true,
+  "settings_window_width": 520,
+  "settings_window_height": 882
+}

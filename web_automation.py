@@ -42,15 +42,13 @@ class WebAutomation:
     def _load_headless_setting(self):
         """환경설정 파일에서 headless 설정을 로드합니다."""
         try:
-            # 1. ACCOUNT_NAME 환경변수 확인 (메인 앱 방식)
-            account_name = os.environ.get('ACCOUNT_NAME')
-            if account_name:
-                filename = f"settings_{account_name}.json" if account_name != 'default' else "settings.json"
-                settings_path = os.path.join("data", filename)
-                if os.path.exists(settings_path):
-                    with open(settings_path, 'r', encoding='utf-8') as f:
-                        settings = json.load(f)
-                    return settings.get('browser_headless', False)
+            # 1. 공통 설정 파일 확인 (data/settings.json, 절대 경로 사용)
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            settings_path = os.path.join(base_dir, "data", "settings.json")
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                return settings.get('browser_headless', False)
 
             # 2. 로컬 settings.json 확인 (독립 실행 방식)
             settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -128,8 +126,8 @@ class WebAutomation:
         """로컬 chromedriver.exe로 실행 시도"""
         chrome_options = Options()
         
-        # 브라우저 설정 적용
-        if BROWSER_CONFIG['headless']:
+        # 브라우저 설정 적용 (인스턴스 설정 사용)
+        if self.headless:
             chrome_options.add_argument('--headless')
         
         chrome_options.add_argument('--no-sandbox')

@@ -225,6 +225,7 @@ data/*.json
 !data/survey_quizzes.json
 !data/quiz_problem.json
 !data/survey_problem.json
+!data/settings.json
 
 # 백업 파일들
 backup/
@@ -244,5 +245,5 @@ tmp/
 docs/
 
 # 마크다운 파일(README.md 제외)
-*.md
 !README.md
+!CHANGELOG.md

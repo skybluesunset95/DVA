@@ -16,9 +16,9 @@ class DoctorBillApp:
     def __init__(self, root):
         self.root = root
         
-        # 환경변수에서 계정 이름 가져오기 (기본값: 'default')
-        account_name = os.environ.get('ACCOUNT_NAME', 'default')
-        self.settings_file = os.path.join("data", f"settings_{account_name}.json" if account_name != 'default' else "settings.json")
+        # 모든 계정이 공통 설정을 공유하도록 settings.json으로 고정 (절대 경로 사용)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.settings_file = os.path.join(base_dir, "data", "settings.json")
         
         self.default_settings = {
             'auto_attendance': True,
@@ -225,15 +225,19 @@ class DoctorBillApp:
         self.ui.seminar_panel.seminar_tree.selection_remove(item)
 
     def open_settings(self):
+        # 설정 창을 열기 직전 파일에서 최신 정보를 다시 불러와 동기화합니다.
+        self.settings = self.load_settings()
+        
         def on_save(new_set):
-            old_headless = self.get_setting('browser_headless')
-            for k, v in new_set.items(): self.set_setting(k, v)
-            if old_headless != self.get_setting('browser_headless'):
-                if messagebox.askyesno("재시작", "브라우저 설정이 변경되었습니다. 재시작하시겠습니까?"):
-                    self.task_manager.cleanup_web_automation()
-                    self.auto_login()
-            else:
-                messagebox.showinfo("저장", "저장되었습니다.")
+            # 모든 설정을 저장 (기존의 렉 유발 요인인 재시작 로직 제거)
+            for k, v in new_set.items(): 
+                self.set_setting(k, v)
+            
+            # 현재 실행 중인 자동화 객체가 있다면 headless 설정값을 업데이트
+            if self.task_manager.state.web_automation:
+                self.task_manager.state.web_automation.headless = new_set.get('browser_headless', True)
+                
+            messagebox.showinfo("저장", "설정이 저장되었습니다.")
                 
         def on_close(dims):
             if dims:
