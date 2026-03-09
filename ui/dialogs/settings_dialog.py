@@ -344,12 +344,24 @@ class SettingsDialog:
                 try: w.configure(state=state)
                 except: pass
         
+        kakao_header_frame = tk.Frame(notify_frame, bg='#f0f0f0')
+        kakao_header_frame.pack(fill='x')
+
         kakao_check = tk.Checkbutton(
-            notify_frame, text="💬 카카오톡 알림 받기", variable=self.setting_vars['kakao_notify_enabled'],
+            kakao_header_frame, text="💬 카카오톡 알림 받기", variable=self.setting_vars['kakao_notify_enabled'],
             command=_on_kakao_toggle, font=("맑은 고딕", 11), bg='#f0f0f0', fg='#2c3e50',
             activebackground='#f0f0f0', activeforeground='#2c3e50'
         )
-        kakao_check.pack(anchor='w', pady=(2, 0))
+        kakao_check.pack(side='left', pady=(2, 0))
+
+        # 도움말 버튼 추가
+        help_btn = tk.Button(
+            kakao_header_frame, text="❓ 도움말", font=("맑은 고딕", 9, "bold"),
+            bg='#f0f0f0', fg='#3498db', relief='flat', cursor='hand2',
+            command=self._show_kakao_help, activebackground='#f0f0f0'
+        )
+        help_btn.pack(side='left', padx=5, pady=(4, 0))
+        ToolTip(help_btn, "카카오톡 알림 설정 방법을 확인합니다.")
         
         tk.Label(
             notify_frame, text="  └ 설정한 주요 작업 완료 및 오류 발생 시 카카오톡으로 알림을 보냅니다.",
@@ -402,6 +414,22 @@ class SettingsDialog:
         _on_enter_toggle()
         _on_refresh_toggle()
         _on_kakao_toggle()
+
+    def _show_kakao_help(self):
+        """카카오톡 알림 설정 도움말 표시"""
+        help_text = (
+            "🚀 카카오톡 알림 설정 방법 (최초 1회)\n\n"
+            "1. REST API 키 준비\n"
+            "   - '카카오 개발자 센터'에서 앱 생성 후 REST API 키를 복사하세요.\n\n"
+            "2. 인증 과정 (창 하단 [재인증] 버튼 클릭)\n"
+            "   - '재인증' 버튼을 누르면 브라우저 창이 열립니다.\n"
+            "   - 카카오톡 로그인을 진행하고 '나에게 메시지 보내기'에 동의합니다.\n\n"
+            "3. 코드 복사 및 입력\n"
+            "   - 동의 후 이동된 주소창에서 [code=...] 뒤의 문구를 복사합니다.\n"
+            "   - 프로그램과 함께 열린 검은색 창(콘솔)에 붙여넣고 엔터를 누릅니다.\n\n"
+            "💡 한 번만 인증하면 이후에는 자동으로 갱신됩니다!"
+        )
+        messagebox.showinfo("❓ 카카오톡 알림 도움말", help_text)
 
     def _on_save(self):
         new_settings = {}

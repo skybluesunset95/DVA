@@ -43,44 +43,52 @@ class BaseModule:
         self.gui_callbacks = gui_callbacks
     
     def log_info(self, message):
-        """정보 로그를 기록합니다."""
-        # GUI에만 표시 (중복 방지)
-        if self.gui_logger:
-            self.gui_logger(f"ℹ {message}")
+        """
+        정보 로깅 - 파일 로그에는 기록하고, GUI에는 이모티콘 있을 때만 직접 노출
+        """
+        # 1. 시스템 파일 로그에는 무조건 기록 (디버깅용)
+        # INFO 레벨 이상이 GUI와 연결되어 있을 가능성이 높으므로, 
+        # GUI 노출을 원치 않는 것은 DEBUG 레벨로 기록합니다.
+        UI_EMOJIS = ("✅", "🔐", "📅", "📝", "💰", "🔍", "🔄", "⚠️", "🚨", "🎉", "🚪", "🛵", "🔎", "💡", "📊", "🎯")
         
-        # 파일 로그는 디버그 모드에서만 사용 (중복 방지)
-        # if hasattr(self, 'logger') and self.logger:
-        #     self.logger.info(message)
-    
-    def log_error(self, message):
-        """에러 로그를 기록합니다."""
-        # GUI에 표시
-        if self.gui_logger:
-            self.gui_logger(f"❌ {message}")
+        is_important = message.strip().startswith(UI_EMOJIS)
         
-        # 에러는 파일에도 기록 (중요한 정보)
-        if hasattr(self, 'logger') and self.logger:
-            self.logger.error(message)
-    
+        if is_important:
+            self.logger.info(message)
+            if self.gui_logger:
+                # GUI 콜백을 직접 호출 (시스템 로거를 통하지 않음)
+                self.gui_logger(message)
+        else:
+            # 이모티콘 없는 자질구레한 로그는 DEBUG 레벨로 숨김 (파일에는 남음)
+            self.logger.debug(message)
+
     def log_success(self, message):
-        """성공 로그를 기록합니다."""
-        # GUI에만 표시 (중복 방지)
-        if self.gui_logger:
-            self.gui_logger(f"✅ {message}")
+        """성공 로깅 (GUI 노출 보장)"""
+        # 이미 이모티콘이 있을 수 있으니 체크
+        if not message.startswith("✅"):
+            message = f"✅ {message}"
         
-        # 파일 로그는 디버그 모드에서만 사용 (중복 방지)
-        # if hasattr(self, 'logger') and self.logger:
-        #     self.logger.info(message)
-    
+        self.logger.info(message)
+        if self.gui_logger:
+            self.gui_logger(message)
+
+    def log_error(self, message):
+        """에러 로깅 (GUI 노출 보장)"""
+        if not message.startswith("❌"):
+            message = f"❌ {message}"
+            
+        self.logger.error(message)
+        if self.gui_logger:
+            self.gui_logger(message)
+
     def log_warning(self, message):
-        """경고 로그를 기록합니다."""
-        # GUI에 표시
+        """경고 로깅 (GUI 노출 보장)"""
+        if not message.startswith("⚠️"):
+            message = f"⚠️ {message}"
+            
+        self.logger.warning(message)
         if self.gui_logger:
-            self.gui_logger(f"⚠ {message}")
-        
-        # 경고도 파일에 기록 (중요한 정보)
-        if hasattr(self, 'logger') and self.logger:
-            self.logger.warning(message)
+            self.gui_logger(message)
     
     def log_and_update(self, message, status=None):
         """로깅과 상태 업데이트를 한 번에 처리합니다."""

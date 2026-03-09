@@ -9,6 +9,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from .base_module import BaseModule
 from .quiz_problem import QuizProblemManager
+from .messages import MSG_QUIZ_START, MSG_QUIZ_ALREADY, MSG_QUIZ_SUCCESS
 import time
 import os
 
@@ -52,9 +53,13 @@ class QuizModule(BaseModule):
         self.blog_window = None
     
     def wait_for_page_load(self, timeout=None):
-        """페이지 로딩 완료 대기"""
+        """페이지 로딩 완료 대기 (JS readyState 활용으로 최적화)"""
         try:
-            self.find_element_safe(By.TAG_NAME, "body", timeout=timeout or 10)
+            # document.readyState가 complete가 될 때까지 대기 (body 찾는 것보다 정확하고 빠름)
+            from selenium.webdriver.support.ui import WebDriverWait
+            WebDriverWait(self.web_automation.driver, timeout or 10).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
             return True
         except Exception:
             return False
@@ -88,73 +93,131 @@ class QuizModule(BaseModule):
         """일반적인 오류 처리 (하위 호환성 위해 BaseModule로 전달)"""
         return self.handle_error('unknown', f"{operation_name} 실패: {str(error)}")
     
-    def execute(self):
-        """퀴즈풀기 실행 - 로컬 DB 연동 및 블로그 검색 하이브리드 방식"""
-        is_success = False
-        result_msg = ""
-        quiz_data = None
-        blog_answers_str = None
-        
+    def _navigate_to_quiz_page(self):
+        """퀴즈 페이지 찾기 및 이동"""
+        self.quiz_page_type = self.find_quiz_page()
+        return bool(self.quiz_page_type)
+
+    def _check_quiz_completed(self):
+        """이미 퀴즈를 완료했는지 확인"""
+        # find_quiz_page에서 찾지 못했다면 이미 완료했거나 오늘 퀴즈가 없는 것으로 간주
+        if not hasattr(self, 'quiz_page_type') or not self.quiz_page_type:
+            return True
+        return False
+
+    def _attempt_quiz(self):
+        """실제 퀴즈 풀기 프로세스 (팝업 열기 -> 수집 -> 풀기 -> 제출)"""
         try:
-            self.log_info("퀴즈풀기 시작...")
-            
-            # 0단계: 현재 창 핸들 저장
-            self.original_window = self.web_automation.driver.current_window_handle
-            
-            # 1단계: 퀴즈가 있는 페이지 찾기
-            quiz_page = self.find_quiz_page()
-            if not quiz_page:
-                is_success = False
-                result_msg = "오늘은 퀴즈가 제공되지 않습니다."
-                return self.create_result(is_success, result_msg)
-            
-            # 2단계: 퀴즈 팝업 열기
+            # 1. 팝업 열기
             if not self.open_quiz_popup():
-                result_msg = "퀴즈 팝업 열기 실패"
-                return self.create_result(False, result_msg)
-            
-            # 3단계: 문제 정보 수집
+                return False
+                
+            # 2. 🔥 이미 풀었는지 즉시 확인
+            if self._is_popup_quiz_solved():
+                self.log_info(MSG_QUIZ_ALREADY)
+                return True
+                
+            # 3. 정보 수집
             quiz_data = self.collect_quiz_info()
             if not quiz_data:
-                result_msg = "퀴즈 정보 수집 실패"
-                return self.create_result(False, result_msg)
-            
-            # 4단계: 각 문제별 정답 확보 및 즉시 선택
+                return False
+                
+            # 4. 문제 풀기 (각 문제별 정답 찾기 및 클릭)
+            blog_answers_str = ""
             blog_searched = False
+            
             for i, q_info in enumerate(quiz_data['questions']):
-                self.log_info(f"--- [문제 {i+1}] 분석 및 답변 시작 ---")
                 success, blog_answers_str, blog_searched = self._process_single_question(
                     q_info, i, quiz_data, blog_answers_str, blog_searched
                 )
                 if not success:
-                    result_msg = f"문제 {i+1} 정답 부재 또는 선택 실패로 인해 진행 불가"
-                    return self.create_result(False, result_msg)
+                    self.log_error(f"문제 {i+1} 풀기 도중 중단됨")
+                    return False
             
-            # 5단계: 모든 정답 선택 후 제출
-            self.log_info("✨ 모든 문제 답변 완료. '정답 도전' 버튼을 클릭합니다.")
-            if self.click_submit_button():
-                # 블로그에서 새로 찾은 정답이 있다면 DB에 학습
-                if blog_answers_str:
-                    self.save_to_local_db(quiz_data, blog_answers_str)
+            # 5. 제출 (모든 문제를 푼 후)
+            if not self.click_submit_button():
+                return False
                 
-                is_success = True
-                result_msg = "일일 퀴즈 풀기 성공 및 데이터 학습 완료"
-                self.log_success("🎉 일일 퀴즈 풀기 대성공!")
-            else:
-                result_msg = "답안 제출 버튼 클릭 실패"
+            # 6. 정답 학습 (성공 후 로컬 DB 저장)
+            if blog_answers_str:
+                self.save_to_local_db(quiz_data, blog_answers_str)
+                
+            return True
             
         except Exception as e:
-            result_msg = f"퀴즈풀기 실행 실패: {str(e)}"
+            self.log_error(f"퀴즈 시도 중 오류: {str(e)}")
+            return False
+
+    def _is_popup_quiz_solved(self):
+        """팝업 내부에서 이미 퀴즈를 풀었는지 확인 (지연 시간 최소화)"""
+        try:
+            # 1. '축하드립니다' 또는 '성공' 문구 확인 (가장 확실함)
+            is_finished_text = self.web_automation.driver.execute_script("""
+                var text = document.body.innerText;
+                return text.includes('퀴즈 성공') || text.includes('축하드립니다') || text.includes('내일 다시');
+            """)
+            if is_finished_text:
+                self.log_info("🔍 팝업에 '완료 문구'가 확인됩니다.")
+                return True
+
+            # 2. 이미 선택된 정답이 있는지 확인 (라디오 버튼 checked 상태)
+            is_any_checked = self.web_automation.driver.execute_script("""
+                return document.querySelector('input[type="radio"]:checked') !== null;
+            """)
+            if is_any_checked:
+                self.log_info("🔍 이미 선택된 답변이 있습니다. 완료된 것으로 간주합니다.")
+                return True
+                
+            # 3. 정답 도전 버튼이 아예 없는지 확인 (초고속 체크)
+            try:
+                submit_btn = self.web_automation.driver.find_element(By.ID, ANSWER_CONFIRM_BUTTON_ID)
+                if not submit_btn.is_displayed():
+                    return True
+            except:
+                return True # 버튼이 없으면 완료
+                
+            return False
+        except Exception:
+            return False
+
+    def execute(self):
+        """일일 퀴즈 풀기 작업 실행 (외부 호출 엔트리 포인트)"""
+        is_success = False
+        result_msg = ""
+        
+        try:
+            if hasattr(self.web_automation.driver, 'current_window_handle'):
+                self.original_window = self.web_automation.driver.current_window_handle
+            self.log_info(MSG_QUIZ_START)
+            
+            # 1. 퀴즈 페이지 이동
+            if not self._navigate_to_quiz_page():
+                self.log_info(MSG_QUIZ_ALREADY)
+                return self.create_result(True, MSG_QUIZ_ALREADY)
+            
+            # 2. 퀴즈 풀기 시도 (이미 푼 경우 내부적으로 True 반환)
+            if self._attempt_quiz():
+                is_success = True
+                result_msg = MSG_QUIZ_SUCCESS
+                # 이미 푼 경우 MSG_QUIZ_ALREADY 로그가 이전에 찍혔을 것임
+            else:
+                is_success = False
+                result_msg = "일일 퀴즈 풀기 실패"
+                
+        except Exception as e:
+            is_success = False
+            result_msg = f"퀴즈 실행 중 오류 발생: {str(e)}"
             self.log_error(result_msg)
             
         finally:
             # 🗑️ 블로그 탭 정리 (남아있다면)
             try:
-                if self.blog_window:
+                if hasattr(self, 'blog_window') and self.blog_window:
                     self.web_automation.driver.switch_to.window(self.blog_window)
                     self.web_automation.driver.close()
                     self.log_info("🔓 블로그 참고 탭을 닫았습니다.")
-                    self.web_automation.driver.switch_to.window(self.original_window)
+                    if self.original_window:
+                        self.web_automation.driver.switch_to.window(self.original_window)
             except:
                 pass
                 
@@ -301,16 +364,15 @@ class QuizModule(BaseModule):
     def navigate_to_page(self, url, page_name):
         """페이지로 이동하고 로딩 완료 대기"""
         try:
-            self.log_info(f"{page_name} 페이지로 이동 중...")
+            self.log_info(f"🔄 {page_name} 페이지로 이동 중...")
             
             self.web_automation.driver.get(url)
             
             # 페이지 로딩 대기
             if self.wait_for_page_load():
-                self.log_success(f"{page_name} 페이지 로딩 완료")
                 return True
             else:
-                self.log_error(f"{page_name} 페이지 로딩 시간 초과")
+                self.log_error(f"❌ {page_name} 페이지 로딩 시간 초과")
                 return False
                 
         except Exception as e:
@@ -607,6 +669,9 @@ class QuizModule(BaseModule):
         js_code = """
             var radio = document.querySelector(arguments[0]);
             if (!radio) return 'RADIO_NOT_FOUND';
+            
+            // 🔥 이미 체크되어 있다면 중복 클릭 방지
+            if (radio.checked) return 'ALREADY_CHECKED';
             
             // 방법 1: 부모 li 안의 label을 JS 클릭
             var li = radio.closest('li');

@@ -10,6 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from .base_module import BaseModule
+from .messages import MSG_ATTENDANCE_START, MSG_ATTENDANCE_SUCCESS, MSG_ATTENDANCE_ALREADY
 
 # URL 상수 정의
 ATTENDANCE_PAGE_URL = "https://www.doctorville.co.kr/event/attend"
@@ -33,33 +34,28 @@ class AttendanceModule(BaseModule):
     
     def execute(self):
         """출석체크 페이지로 이동하고 포인트 받기 버튼 클릭"""
+        """출석체크 작업 실행"""
         is_success = False
         result_msg = ""
         
         try:
-            if not self.web_automation.driver:
-                result_msg = ERROR_WEBDRIVER_NOT_INITIALIZED
-                return self.create_result(False, result_msg)
-            
-            self.log_info("출석체크 페이지로 이동 중...")
+            self.log_info(MSG_ATTENDANCE_START)
             
             # 출석체크 페이지로 이동
-            if not self._navigate_to_attendance_page():
-                result_msg = ERROR_ATTENDANCE_PAGE_NAVIGATION
-                return self.create_result(False, result_msg)
+            self._navigate_to_attendance_page()
             
-            # 출석하기 버튼 클릭
+            # 출석 버튼 클릭 시도
             if self.click_attend_button():
-                self.log_info("출석체크 완료!")
                 is_success = True
-                result_msg = "출석체크 성공"
+                result_msg = MSG_ATTENDANCE_SUCCESS
             else:
-                is_success = False
-                result_msg = ERROR_ATTEND_BUTTON_CLICK
+                is_success = True
+                result_msg = MSG_ATTENDANCE_ALREADY
+                self.log_info(result_msg)
             
         except Exception as e:
             is_success = False
-            result_msg = f"{ERROR_ATTENDANCE_EXECUTION}: {str(e)}"
+            result_msg = f"출석체크 실행 중 오류 발생: {str(e)}"
             self.log_error(result_msg)
             
         return self.create_result(is_success, result_msg)

@@ -10,7 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from modules.base_module import BaseModule, STATUS_ATTENDANCE_COMPLETE, STATUS_ATTENDANCE_INCOMPLETE, STATUS_QUIZ_COMPLETE, STATUS_QUIZ_INCOMPLETE, STATUS_KEY_ATTENDANCE, STATUS_KEY_QUIZ
 from selenium.common.exceptions import TimeoutException
-
+from modules.messages import MSG_POINTS_SUMMARY
 # URL 상수 정의
 POINTS_PAGE_URL = "https://www.doctorville.co.kr/my/point/pointUseHistoryList"
 MAIN_PAGE_URL = "https://www.doctorville.co.kr/my/main"

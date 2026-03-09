@@ -46,6 +46,11 @@ WAIT_TIMES = {
 }
 
 from modules.base_module import BaseModule
+from modules.messages import (
+    MSG_LOGIN_START, MSG_LOGIN_SUCCESS, MSG_LOGIN_STEP_SETUP,
+    MSG_LOGIN_STEP_NAVIGATE, MSG_LOGIN_STEP_CLICK_UNIFIED,
+    MSG_LOGIN_STEP_WAIT_FORM, MSG_LOGIN_STEP_PERFORM, MSG_LOGIN_STEP_CHECK
+)
 
 class LoginModule(BaseModule):
     def __init__(self, web_automation, gui_logger=None):
@@ -55,14 +60,14 @@ class LoginModule(BaseModule):
     def execute(self):
         """완전한 로그인 프로세스 실행"""
         try:
-            self.log_info("자동 로그인을 시작합니다...")
+            self.log_info(MSG_LOGIN_START)
             
             # 단계별 로그인 프로세스 실행
             if not self._execute_login_steps():
                 return self.create_result(False, "로그인 단계 실행 실패")
             
             # 로그인 완료 후 성공 반환 (포인트 확인은 이제 TaskManager에서 수행)
-            return self.create_result(True, "자동 로그인 성공")
+            return self.create_result(True, MSG_LOGIN_SUCCESS)
             
         except Exception as e:
             error_msg = f"자동 로그인 실패: {str(e)}"
@@ -73,20 +78,21 @@ class LoginModule(BaseModule):
     def _execute_login_steps(self):
         """로그인 단계들을 순차적으로 실행합니다."""
         steps = [
-            ("웹드라이버 설정", self._setup_driver),
-            ("닥터빌 메인 페이지 이동", self.navigate_to_doctorville),
-            ("통합회원 로그인 버튼 클릭", self.click_unified_login),
-            ("로그인 폼 로딩 대기", self.wait_for_login_form),
-            ("로그인 정보 입력 및 로그인", self.perform_login),
-            ("로그인 성공 여부 확인", self.check_login_success)
+            (MSG_LOGIN_STEP_SETUP, self._setup_driver),
+            (MSG_LOGIN_STEP_NAVIGATE, self.navigate_to_doctorville),
+            (MSG_LOGIN_STEP_CLICK_UNIFIED, self.click_unified_login),
+            (MSG_LOGIN_STEP_WAIT_FORM, self.wait_for_login_form),
+            (MSG_LOGIN_STEP_PERFORM, self.perform_login),
+            (MSG_LOGIN_STEP_CHECK, self.check_login_success)
         ]
         
         for step_name, step_func in steps:
+            # 과정 로그는 이모티콘 없이 기록 (시스템 로그 전용)
             self.log_info(f"{step_name} 중...")
             if not step_func():
                 self.log_error(f"{step_name} 실패")
                 return False
-            self.log_success(f"{step_name} 완료")
+            self.log_info(f"{step_name} 완료")
         
         return True
     

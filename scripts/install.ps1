@@ -65,34 +65,8 @@ else {
     exit 1
 }
 
-Write-Host ""
-Write-Host "Setting up account information..." -ForegroundColor Cyan
-Write-Host ""
+# 2. 계정 정보 설정 (인코딩 문제 방지를 위해 파이썬으로 위임)
+python "$PSScriptRoot\account_setup.py"
 
-$accountName = Read-Host "계정 별칭을 입력하세요 (예: 계정1, 홍길동 - 파일명 앞에 붙을 이름입니다. 한글 가능)"
-if ([string]::IsNullOrWhiteSpace($accountName)) { $accountName = "Account1" }
-$accountUsername = Read-Host "닥터빌 로그인 이메일(ID)을 입력하세요"
-$accountPassword = Read-Host "닥터빌 로그인 비밀번호를 입력하세요" -AsSecureString
-$plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToCoTaskMemUnicode($accountPassword))
-
-# Create account batch file
-$batFileName = "$accountName`_닥터빌.bat"
-$batContent = "@echo off`r`nchcp 65001 >nul 2>&1`r`nset ACCOUNT_NAME=$accountName`r`nset ACCOUNT_USERNAME=$accountUsername`r`nset ACCOUNT_PASSWORD=$plainPassword`r`nstart /min `"`" pythonw main.py"
-
-try {
-    # 한글 호환성을 위해 BOM이 포함된 UTF8로 저장 (Windows CMD 필수)
-    $batContent | Out-File -FilePath $batFileName -Encoding UTF8 -Force
-    Write-Host "Account file '$batFileName' created successfully!" -ForegroundColor Green
-}
-catch {
-    Write-Host "Error creating account file: $($_.Exception.Message)" -ForegroundColor Red
-    Read-Host "Press Enter"
-    exit 1
-}
-
-Write-Host ""
-Write-Host "설정이 완료되었습니다!" -ForegroundColor Green
-Write-Host "실행 방법: '$batFileName' 파일을 더블클릭하여 프로그램을 시작하세요." -ForegroundColor Cyan
-Write-Host ""
-Read-Host "Press Enter"
+exit 0
 

@@ -6,6 +6,7 @@ import threading
 import logging
 import time
 import pystray
+from datetime import datetime
 from pystray import MenuItem as item
 from PIL import Image
 
@@ -38,11 +39,20 @@ class DoctorBillApp:
             'auto_quiz_min': 5,
             'auto_survey': True,
             'auto_seminar_refresh': True,
-            'auto_seminar_join': False,
-            'auto_seminar_enter': False,
+            'auto_seminar_join': True,      # 자동 세미나 신청 활성화
+            'auto_seminar_enter': True,     # 자동 세미나 입장 활성화
             'seminar_enter_delay': 5,
             'seminar_refresh_interval': 5,
-            'browser_headless': True,
+            'browser_headless': False,      # 크롬 창 보이게 설정
+            'kakao_notify_enabled': False,  # 카카오톡 알림 비활성화
+            'notify_attendance': True,
+            'notify_quiz': True,
+            'notify_survey': True,
+            'notify_seminar_join': True,
+            'notify_seminar_enter': True,
+            'notify_baemin': True,
+            'notify_startup_summary': True,
+            'notify_error': True,
             'settings_window_width': 520,
             'settings_window_height': 850
         }
@@ -316,6 +326,10 @@ class DoctorBillApp:
     def hide_window(self):
         """창을 숨기고 트레이로 최소화한 것처럼 보이게 합니다."""
         self.root.withdraw()
+        
+        # 💡 브라우저 창도 같이 숨김 (설정이 '창 보이기' 상태일 때만 의미 있음)
+        self.task_manager.set_browser_visibility(False)
+        
         if hasattr(self, 'tray_icon'):
             # 현재 상태를 다시 한번 메뉴에 반영
             self.refresh_tray_menu()
@@ -326,6 +340,9 @@ class DoctorBillApp:
         self.root.after(0, self.root.deiconify)
         self.root.after(0, self.root.lift)
         self.root.after(0, lambda: self.root.state('normal'))
+        
+        # 💡 브라우저 창도 같이 다시 표시
+        self.task_manager.set_browser_visibility(True)
 
     def on_closing(self, icon=None, item=None):
         self.log_message("프로그램을 종료합니다...")
@@ -421,22 +438,33 @@ class DoctorBillApp:
 
     # ================= Utils =================
     def setup_logging(self):
-        class GUILogHandler(logging.Handler):
-            def __init__(self, log_func):
-                super().__init__()
-                self.log_func = log_func
-            def emit(self, record):
-                try:
-                    msg = self.format(record)
-                    self.log_func(msg)
-                except Exception:
-                    pass
-                
+        """
+        로깅 설정 - 시스템 로그는 파일에만 남기고, GUI 로그는 명시적 콜백으로만 관리
+        """
+        # 로그 저장 폴더 생성
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        account_name = os.environ.get('ACCOUNT_NAME', 'default')
+        log_file = os.path.join(log_dir, f"dva_{account_name}_{datetime.now().strftime('%Y%m%d')}.log")
+        
+        # 전체 로거 설정 (INFO 레벨)
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
-        gui_handler = GUILogHandler(self.log_message)
-        gui_handler.setFormatter(logging.Formatter('%(message)s'))
-        logger.addHandler(gui_handler)
+        
+        # 기존 핸들러 제거 (중복 방지)
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            
+        # 1. 파일 핸들러 (모든 상세 로그 저장)
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s'))
+        logger.addHandler(file_handler)
+        
+        # 💡 [중요] GUI 핸들러는 더 이상 Root Logger에 추가하지 않습니다.
+        # 이렇게 함으로써 logger.info() 호출이 GUI 로그창을 더럽히는 것을 원천 봉쇄합니다.
+        # GUI 로그는 오직 self.log_message() 호출을 통해서만 이루어집니다.
 
     def check_scheduled_tasks(self):
         self.task_manager.check_scheduled_tasks(self.settings, self.get_callbacks())

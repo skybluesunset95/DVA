@@ -18,6 +18,10 @@ from modules.base_module import (
     STATUS_KEY_ATTENDANCE, 
     STATUS_KEY_QUIZ
 )
+from modules.messages import (
+    MSG_SEMINAR_REFRESH, MSG_SEMINAR_AUTO_APPLY_START, MSG_SEMINAR_APPLY_SUCCESS, 
+    MSG_SEMINAR_APPLY_NONE, MSG_SEMINAR_AUTO_ENTER, MSG_POINTS_SUMMARY
+)
 from modules.notification_manager import NotificationManager
 
 class TaskManagerState:
@@ -110,11 +114,11 @@ class TaskManagerState:
             if value:  # 로그인 시작
                 self._current_module = 'login'
                 self._last_activity = datetime.now()
-                self._logger.info("로그인 상태: 시작됨")
+                self._logger.debug("로그인 상태: 시작됨")
             else:  # 로그인 종료
                 self._current_module = None
                 self._last_activity = datetime.now()
-                self._logger.info("로그인 상태: 종료됨")
+                self._logger.debug("로그인 상태: 종료됨")
     
     @property
     def current_module(self):
@@ -130,21 +134,21 @@ class TaskManagerState:
         
         if old_value != value:
             if value:
-                self._logger.info(f"현재 모듈: {value} 시작")
+                self._logger.debug(f"현재 모듈: {value} 시작")
             else:
-                self._logger.info("모듈 실행 완료")
+                self._logger.debug("모듈 실행 완료")
     
     def add_module_to_queue(self, module_name):
         """모듈을 큐에 추가"""
         if module_name not in self._module_queue:
             self._module_queue.append(module_name)
-            self._logger.info(f"모듈 큐에 추가: {module_name}")
+            self._logger.debug(f"모듈 큐에 추가: {module_name}")
     
     def remove_module_from_queue(self, module_name):
         """모듈을 큐에서 제거"""
         if module_name in self._module_queue:
             self._module_queue.remove(module_name)
-            self._logger.info(f"모듈 큐에서 제거: {module_name}")
+            self._logger.debug(f"모듈 큐에서 제거: {module_name}")
     
     def get_status_summary(self):
         """현재 상태 요약 반환"""
@@ -335,8 +339,9 @@ class TaskManager:
                 mod_callbacks['notify_kakao'] = lambda msg, cat="notify_survey": self.notifier.send_kakao_message(msg, category=cat)
                 mod_callbacks['notify_success'] = lambda msg: self.notifier.send_kakao_message(msg, category="notify_survey")
                 
-                # 현재 모듈 상태 업데이트
+                # 현재 모듈 상태 업데이트 (시스템 로그에만 기록)
                 self.state.current_module = module_name
+                self.logger.info(f"--- [ {module_name} ] 모듈 실행 시작 ---")
                 
                 # 모듈 생성
                 module = module_class(web_auto, gui_logger)
@@ -415,7 +420,7 @@ class TaskManager:
             return False
         
         self.state.is_logging_in = True
-        self.logger.info("로그인 실행 시작")
+        self.logger.debug("로그인 실행 시작")
         
         # 모듈을 큐에 추가
         self.state.add_module_to_queue('login')
@@ -581,7 +586,7 @@ class TaskManager:
                     seminar = module_class(web_auto, gui_logger)
                     seminar.set_callbacks(gui_callbacks)
     
-                    gui_callbacks['log_message']("🔄 세미나 목록을 새로고침합니다...")
+                    gui_callbacks['log_message'](MSG_SEMINAR_REFRESH)
                     seminars_res = seminar.get_seminar_list()
                     
                     # 결과 목록 추출
@@ -675,9 +680,40 @@ class TaskManager:
                     seminar.set_callbacks(gui_callbacks)
     
                     result = seminar.auto_apply_available_seminars()
-                    count = result.get('data', {}).get('count', 0) if isinstance(result, dict) else 0
-                    if count > 0:
-                        gui_callbacks['log_message'](f"✅ 자동 세미나 신청 완료: {count}개")
+                    stats = result.get('data', {}) if isinstance(result, dict) else {}
+                    
+                    total = stats.get('total', 0)
+                    success = stats.get('success', 0)
+                    closed = stats.get('closed', 0)
+                    applied_already = stats.get('applied', 0)
+                    applied_titles = stats.get('applied_titles', [])
+                    
+                    # 1. 신규 신청 성공 건이 있을 때만 상세 보고
+                    if success > 0:
+                        # 원래 있던 성공 로그 복구
+                        msg_original = MSG_SEMINAR_APPLY_SUCCESS.format(count=success)
+                        gui_callbacks['log_message'](msg_original)
+                        
+                        # 📊 요약 메시지 구성
+                        final_applied = applied_already + success
+                        summary_msg = f"📊 [세미나 요약] 전체: {total}건, 신청완료: {final_applied}건, 신청마감: {closed}건"
+                        gui_callbacks['log_message'](summary_msg)
+                        
+                        # 카톡 알림 구성
+                        titles_str = "\n".join([f"- {t}" for t in applied_titles])
+                        kakao_msg = f"{summary_msg}\n\n✅ 이번 자동 신청 ({success}건):\n{titles_str}"
+                        
+                        try:
+                            self.notifier.send_kakao_message(kakao_msg, category="notify_seminar_join")
+                        except Exception as ne:
+                            self.logger.error(f"세미나 신청 알림 전송 실패: {ne}")
+                        
+                        # 🔥 신규 신청이 있었으므로 즉시 UI 갱신
+                        self._handle_seminar_refresh(gui_callbacks)
+                    else:
+                        # 새로운 신청이 없으면 조용히 종료 (로그 도배 방지)
+                        # 단, UI 목록은 최신 정보를 유지하기 위해 필요시 갱신 (이미 룬 메드 루틴에서 처리됨)
+                        pass
             except Exception as e:
                 self.logger.error(f"자동 세미나 신청 오류: {str(e)}")
             finally:
@@ -1009,6 +1045,11 @@ class TaskManager:
     def get_status_summary(self):
         """현재 상태 요약 반환"""
         return self.state.get_status_summary()
+    
+    def set_browser_visibility(self, visible):
+        """브라우저 가시성 제어 요청 전달"""
+        if self.state.web_automation:
+            self.state.web_automation.set_visibility(visible)
     
     def get_cache_info(self):
         """캐시 정보 반환 - 성능 모니터링용"""

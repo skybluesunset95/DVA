@@ -1,2 +1,5 @@
 @echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install.ps1"
+setlocal
+cd /d "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install.ps1"
+pause

@@ -259,45 +259,72 @@ class SeminarModule(BaseModule):
         self.web_automation.driver.execute_script(script)
 
     def auto_apply_available_seminars(self):
-        """신청 가능한 세미나를 자동으로 전부 신청합니다."""
+        """신청 가능한 세미나를 자동으로 전부 신청합니다 (통계 포함)"""
         try:
             seminars = self.get_seminar_list()
+            total_count = len(seminars)
+            
+            # 통계 데이터 초기화
+            stats = {
+                'total': total_count,
+                'target': 0,      # 이번에 신청 시도할 대상
+                'success': 0,     # 이번에 성공한 개수
+                'closed': 0,      # 종료/마감된 개수
+                'applied': 0,     # 이미 신청되어 있던 개수
+                'applied_titles': []
+            }
+            
             if not seminars:
-                return self.create_result(True, "진행 중인 세미나가 없습니다", {"count": 0, "seminars": []})
+                return self.create_result(True, "진행 중인 세미나가 없습니다", stats)
 
-            # 모든 날짜의 세미나 중 '신청가능' 상태인 것 필터링
             targets = []
             for s in seminars:
                 status_tag = get_status_tag(s.get('status', ''))
                 if status_tag == '신청가능':
                     targets.append(s)
+                    stats['target'] += 1
+                elif status_tag == '신청마감':
+                    stats['closed'] += 1
+                elif status_tag == '신청완료':
+                    stats['applied'] += 1
             
             if not targets:
-                return self.create_result(True, "자동 신청할 세미나가 없습니다", {"count": 0, "seminars": []})
+                # 신청할 건이 없더라도 통계는 반환 (성공 0건)
+                return self.create_result(True, "자동 신청할 세미나가 없습니다", stats)
             
             success_count = 0
-            for s in targets:
-                title = s.get('title', '제목 없음')
-                detail_link = s.get('detail_link', '')
-                if not detail_link: continue
-                
-                self.log_info(f"자동 신청 시도 중: {title}")
-                res = self.handle_seminar_action(detail_link, '신청가능')
-                
-                success = res.get('success', False) if isinstance(res, dict) else bool(res)
-                if success:
-                    success_count += 1
-                    self.log_success(f"자동 신청 완료: {title}")
-                else:
-                    msg = res.get('message', '실패') if isinstance(res, dict) else '실패'
-                    self.log_warning(f"자동 신청 실패: {title} ({msg})")
-                
-                time.sleep(1) # 연속 신청 시 안정성을 위해 딜레이
+            applied_titles = []
+            
+            if targets:
+                for s in targets:
+                    title = s.get('title', '제목 없음')
+                    detail_link = s.get('detail_link', '')
+                    if not detail_link: continue
+                    
+                    self.log_info(f"자동 신청 시도 중: {title}")
+                    res = self.handle_seminar_action(detail_link, '신청가능')
+                    
+                    success = res.get('success', False) if isinstance(res, dict) else bool(res)
+                    if success:
+                        success_count += 1
+                        applied_titles.append(title)
+                        self.log_success(f"자동 신청 완료: {title}")
+                    else:
+                        msg = res.get('message', '실패') if isinstance(res, dict) else '실패'
+                        self.log_warning(f"자동 신청 실패: {title} ({msg})")
+                    
+                    time.sleep(1) # 연속 신청 시 안정성을 위해 딜레이
+            
+            stats['success'] = success_count
+            stats['applied_titles'] = applied_titles
+            
+            # 이미 신청되어 있던 것들도 최종 '신청완료' 상태이므로 합산해서 보고
+            final_applied_total = stats['applied'] + success_count
                 
             return self.create_result(
-                success_count > 0, 
-                f"총 {len(targets)}개 중 {success_count}개 자동 신청 완료", 
-                {"count": success_count, "seminars": targets}
+                True, 
+                f"세미나 전체 {total_count}건 중 {success_count}건 자동 신청 완료", 
+                stats
             )
         except Exception as e:
             error_msg = f"자동 신청 프로세스 중 오류: {str(e)}"

@@ -62,30 +62,11 @@ class WebAutomation:
         return False
         
     def _setup_logger(self):
-        """로거 설정"""
-        # 한글 인코딩 문제 해결
-        if sys.platform.startswith('win'):
-            try:
-                locale.setlocale(locale.LC_ALL, 'Korean_Korea.UTF-8')
-            except:
-                try:
-                    locale.setlocale(locale.LC_ALL, 'ko_KR.UTF-8')
-                except:
-                    pass
-        
-        # 로거 설정 (콘솔 출력만)
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler()  # 콘솔 출력
-            ]
-        )
+        """로거 설정 - 상세 정보는 파일에만 남음"""
         return logging.getLogger(__name__)
-    
+
     def setup_driver(self):
         """Chrome 웹드라이버 설정 (로컬 우선, 실패 시 자동 업데이트)"""
-        
         # 1단계: 로컬 chromedriver로 시도
         try:
             return self._try_local_chromedriver()
@@ -146,6 +127,7 @@ class WebAutomation:
             "safebrowsing.enabled": True
         })
         
+        # 로커 파일 핸들러 제거 (Root Logger가 처리)
         # 로컬 ChromeDriver 사용
         chromedriver_path = os.path.join(current_dir, "chromedriver.exe")
         service = Service(chromedriver_path)
@@ -155,10 +137,13 @@ class WebAutomation:
         self.driver.implicitly_wait(BROWSER_CONFIG['implicit_wait'])
         self.driver.set_page_load_timeout(BROWSER_CONFIG['page_load_timeout'])
         
+        # 💡 브라우저 핸들(HWND) 캡처 (가시성 제어용)
+        self._hwnd = self._find_browser_hwnd()
+        
         # WebDriverWait 설정
         self.wait = WebDriverWait(self.driver, 3)
         
-        self.logger.info("웹드라이버가 성공적으로 설정되었습니다.")
+        self.logger.debug("웹드라이버가 성공적으로 설정되었습니다.")
         return True
     
     def _update_chromedriver(self):
@@ -272,3 +257,98 @@ class WebAutomation:
             self.driver.switch_to.window(keep_window_handle)
         except Exception as e:
             self.logger.error(f"창 정리 중 오류: {str(e)}")
+
+    def _find_browser_hwnd(self):
+        """브라우저의 Win32 HWND를 찾아 반환합니다."""
+        if not self.driver or self.headless:
+            return None
+        
+        try:
+            import ctypes
+            import time
+            
+            # 브라우저 제목을 일시적으로 고유하게 변경
+            original_title = "DoctorVille" # 기본값
+            try: original_title = self.driver.title
+            except: pass
+            
+            unique_mark = f"DVA_{int(time.time()*1000)}"
+            try:
+                self.driver.execute_script(f"document.title = '{unique_mark}'")
+            except:
+                return None
+            
+            time.sleep(0.5) # 제목 반영 대기
+            
+            found_hwnd = [0]
+            
+            # EnumWindows를 사용하여 모든 창을 순회하며 제목에 unique_mark가 포함된 창 찾기
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_void_p)
+            
+            def enum_callback(hwnd, lParam):
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+                    if unique_mark in buff.value:
+                        found_hwnd[0] = hwnd
+                        return False # 찾았으므로 중단
+                return True
+            
+            ctypes.windll.user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+            
+            # 원래 제목 복구 (실패해도 무관)
+            try:
+                self.driver.execute_script(f"document.title = {json.dumps(original_title)}")
+            except:
+                pass
+            
+            if found_hwnd[0]:
+                self.logger.info(f"✅ 브라우저 핸들 획득 성공 (HWND: {found_hwnd[0]})")
+                return found_hwnd[0]
+            else:
+                # 💡 마지막 수단: 현재 포커스된 창이 Chrome 계열인지 확인 (방금 띄웠을 가능성 높음)
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+                    if "Chrome" in buff.value or "닥터빌" in buff.value:
+                        self.logger.info(f"✅ 포커스된 창으로 핸들 획득 (HWND: {hwnd})")
+                        return hwnd
+                
+                self.logger.warning("⚠️ 브라우저 핸들을 찾을 수 없습니다.")
+            return None
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"❌ 브라우저 핸들 찾기 중 예외 발생: {e}")
+            return None
+
+    def set_visibility(self, visible):
+        """브라우저 창의 가시성을 제어합니다 (Hide/Show)"""
+        if self.headless or not self.driver:
+            return
+            
+        try:
+            import ctypes
+            # 핸들이 없으면 다시 찾기 시도
+            if not hasattr(self, '_hwnd') or not self._hwnd:
+                self._hwnd = self._find_browser_hwnd()
+            
+            if self._hwnd:
+                # 💡 ShowWindow를 더 확실하게 먹이기 위해 추가 명령 사용
+                sw_cmd = 5 if visible else 0 # 5: SW_SHOW, 0: SW_HIDE
+                
+                # 가끔 한 번에 안 먹히는 경우가 있어 두 번 호출하거나 관련 API 함께 사용
+                ctypes.windll.user32.ShowWindow(self._hwnd, sw_cmd)
+                
+                # 나타날 때 포커스도 함께 주기
+                if visible:
+                    ctypes.windll.user32.SetForegroundWindow(self._hwnd)
+                    
+                state_str = "보임" if visible else "숨김"
+                self.logger.info(f"🖥️ 브라우저 창 상태 변경: {state_str}")
+            else:
+                self.logger.warning("⚠️ 브라우저 핸들이 없어 가시성을 제어할 수 없습니다.")
+        except Exception as e:
+            self.logger.error(f"❌ 브라우저 가시성 제어 오류: {e}")
