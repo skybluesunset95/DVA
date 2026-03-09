@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import ttk, messagebox
+import subprocess
+import sys
 from ui.components.tooltip import ToolTip
 
 class SettingsDialog:
@@ -12,6 +14,7 @@ class SettingsDialog:
         
         self.setting_vars = {}
         self._seminar_sub_widgets = []
+        self._notify_sub_widgets = []
         
         self.settings_window = tk.Toplevel(parent)
         self.settings_window.title("⚙️ 설정")
@@ -323,11 +326,82 @@ class SettingsDialog:
         
         ToolTip(headless_check, "크롬 창을 띄우지 않고 백그라운드에서 작업을 수행합니다.\n체크하면 작업 중 컴퓨터 사용이 더 편리해집니다.", delay=500)
 
+        ToolTip(headless_check, "크롬 창을 띄우지 않고 백그라운드에서 작업을 수행합니다.\n체크하면 작업 중 컴퓨터 사용이 더 편리해집니다.", delay=500)
+
+        # 4. 알림 설정 섹션
+        notify_frame = tk.LabelFrame(
+            parent, text="🔔 알림 설정", font=("맑은 고딕", 12, "bold"),
+            bg='#f0f0f0', fg='#2c3e50', padx=10, pady=5
+        )
+        notify_frame.pack(fill='x', pady=(0, 10))
+
+        # 카카오톡 알림 사용
+        self.setting_vars['kakao_notify_enabled'] = tk.BooleanVar(value=self.get_setting('kakao_notify_enabled'))
+        
+        def _on_kakao_toggle():
+            state = 'normal' if self.setting_vars['kakao_notify_enabled'].get() else 'disabled'
+            for w in self._notify_sub_widgets:
+                try: w.configure(state=state)
+                except: pass
+        
+        kakao_check = tk.Checkbutton(
+            notify_frame, text="💬 카카오톡 알림 받기", variable=self.setting_vars['kakao_notify_enabled'],
+            command=_on_kakao_toggle, font=("맑은 고딕", 11), bg='#f0f0f0', fg='#2c3e50',
+            activebackground='#f0f0f0', activeforeground='#2c3e50'
+        )
+        kakao_check.pack(anchor='w', pady=(2, 0))
+        
+        tk.Label(
+            notify_frame, text="  └ 설정한 주요 작업 완료 및 오류 발생 시 카카오톡으로 알림을 보냅니다.",
+            font=("맑은 고딕", 9), bg='#f0f0f0', fg='#7f8c8d'
+        ).pack(anchor='w', pady=(0, 5), padx=25)
+
+        # 세부 알림 설정 프레임
+        notify_grid = tk.Frame(notify_frame, bg='#f0f0f0')
+        notify_grid.pack(fill='x', padx=25, pady=5)
+        
+        # 개별 알림 설정 항목들
+        notify_items = [
+            ('notify_attendance', "📅 출석체크"),
+            ('notify_quiz', "🧠 퀴즈풀기"),
+            ('notify_survey', "📋 설문참여"),
+            ('notify_seminar_join', "📢 세미나 자동신청"),
+            ('notify_seminar_enter', "📅 세미나 입장"),
+            ('notify_baemin', "🛵 배민 쿠폰구매"),
+            ('notify_startup_summary', "🏠 초기 상태 요약"),
+            ('notify_error', "⚠️ 모든 오류 알림")
+        ]
+        
+        for i, (key, text) in enumerate(notify_items):
+            # 기본값 True로 설정 (명시적으로 False인 경우 제외)
+            current_val = self.get_setting(key)
+            if current_val is None: current_val = True
+            
+            self.setting_vars[key] = tk.BooleanVar(value=current_val)
+            cb = tk.Checkbutton(
+                notify_grid, text=text, variable=self.setting_vars[key],
+                font=("맑은 고딕", 9), bg='#f0f0f0', activebackground='#f0f0f0'
+            )
+            cb.grid(row=i//2, column=i%2, sticky='w', pady=2, padx=(0, 20))
+            self._notify_sub_widgets.append(cb)
+
+        # 인증 버튼
+        auth_btn = tk.Button(
+            notify_frame, text="🔑 카카오톡 알림 도달 확인 및 재인증", font=("맑은 고딕", 9),
+            bg='#fee500', fg='#3c1e1e', relief='flat', cursor='hand2',
+            padx=10, pady=5, command=self._on_kakao_auth
+        )
+        auth_btn.pack(anchor='w', pady=(5, 10), padx=25)
+        self._notify_sub_widgets.append(auth_btn)
+        
+        ToolTip(auth_btn, "최초 1회 인증이 필요하거나, 토큰이 만료되어 알림이 오지 않을 때 클릭하세요.", delay=500)
+
         # 초기 상태 업데이트
         _on_attendance_toggle()
         _on_quiz_toggle()
         _on_enter_toggle()
         _on_refresh_toggle()
+        _on_kakao_toggle()
 
     def _on_save(self):
         new_settings = {}
@@ -362,3 +436,12 @@ class SettingsDialog:
             
         self.settings_window.destroy()
         self.close_callback(dimensions)
+
+    def _on_kakao_auth(self):
+        """카카오 인증 스크립트 실행"""
+        try:
+            # 윈도우에서 새로운 콘솔 창으로 실행
+            subprocess.Popen([sys.executable, "scripts/kakao_auth.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            messagebox.showinfo("알림", "카카오 인증을 위한 새 창이 열렸습니다.\n해당 창의 안내에 따라 인증을 진행해 주세요.")
+        except Exception as e:
+            messagebox.showerror("오류", f"인증 스크립트 실행 실패: {str(e)}")

@@ -33,32 +33,36 @@ class AttendanceModule(BaseModule):
     
     def execute(self):
         """출석체크 페이지로 이동하고 포인트 받기 버튼 클릭"""
+        is_success = False
+        result_msg = ""
+        
         try:
             if not self.web_automation.driver:
-                return self.create_result(False, ERROR_WEBDRIVER_NOT_INITIALIZED)
+                result_msg = ERROR_WEBDRIVER_NOT_INITIALIZED
+                return self.create_result(False, result_msg)
             
             self.log_info("출석체크 페이지로 이동 중...")
             
             # 출석체크 페이지로 이동
             if not self._navigate_to_attendance_page():
-                return self.create_result(False, ERROR_ATTENDANCE_PAGE_NAVIGATION)
+                result_msg = ERROR_ATTENDANCE_PAGE_NAVIGATION
+                return self.create_result(False, result_msg)
             
             # 출석하기 버튼 클릭
-            if not self.click_attend_button():
-                return self.create_result(False, ERROR_ATTEND_BUTTON_CLICK)
-            
-            # 출석체크 완료
-            self.log_info("출석체크 완료!")
-            
-            # 출석체크 후 자동으로 포인트 상태 확인
-            self._check_points_after_attendance()
-            
-            return self.create_result(True, "출석체크 성공")
+            if self.click_attend_button():
+                self.log_info("출석체크 완료!")
+                is_success = True
+                result_msg = "출석체크 성공"
+            else:
+                is_success = False
+                result_msg = ERROR_ATTEND_BUTTON_CLICK
             
         except Exception as e:
-            error_msg = f"{ERROR_ATTENDANCE_EXECUTION}: {str(e)}"
-            self.log_error(error_msg)
-            return self.create_result(False, error_msg)
+            is_success = False
+            result_msg = f"{ERROR_ATTENDANCE_EXECUTION}: {str(e)}"
+            self.log_error(result_msg)
+            
+        return self.create_result(is_success, result_msg)
     
     def _navigate_to_attendance_page(self):
         """출석체크 페이지로 이동"""
@@ -80,25 +84,34 @@ class AttendanceModule(BaseModule):
             self.web_automation.driver.implicitly_wait(0)
             
             try:
-                # 출석하기 버튼을 안전하게 찾기 (짧은 타임아웃)
-                button = self.find_element_safe(By.CLASS_NAME, ATTEND_BUTTON_CLASS, timeout=3)
-                self.log_info("출석하기 버튼 발견")
+                # 출석하기 버튼을 즉시 탐색 (이미 출석한 경우를 위해 0초 대기)
+                # find_elements는 숨겨진 요소도 포함하므로 가시성 체크가 필요함
+                all_buttons = self.web_automation.driver.find_elements(By.CLASS_NAME, ATTEND_BUTTON_CLASS)
                 
-                # 버튼 클릭
-                button.click()
-                self.log_info("출석하기 버튼 클릭 완료")
+                # 실제로 화면에 보이는 버튼만 필터링
+                visible_buttons = [btn for btn in all_buttons if btn.is_displayed()]
                 
-                # 성공 팝업 확인
-                self._check_success_popup()
+                if visible_buttons:
+                    button = visible_buttons[0]
+                    self.log_info("출석하기 버튼 발견")
+                    
+                    # 버튼 클릭
+                    button.click()
+                    self.log_info("출석하기 버튼 클릭 완료")
+                    
+                    # 성공 팝업 확인
+                    self._check_success_popup()
+                else:
+                    self.log_info("출석하기 버튼이 없거나 이미 숨겨져 있습니다. (출석 완료 상태)")
                 
                 return True
                 
-            except NoSuchElementException:
-                self.log_info("출석하기 버튼을 찾을 수 없습니다. (이미 출석체크 완료되었을 수 있습니다)")
-                # 이미 완료된 경우에도 True 반환 (포인트 확인을 위해)
-                return True
+            except Exception as e:
+                # 버튼을 찾는 과정이 아닌 클릭 등 다른 과정에서 오류가 발생한 경우
+                self.log_error(f"출석 작업 중 오류: {str(e)}")
+                return True # 포인트 확인으로 넘어가기 위해 True 반환
             finally:
-                # 원래 암시적 대기 시간으로 복원 (config.py의 값)
+                # 원래 암시적 대기 시간으로 복원
                 self.web_automation.driver.implicitly_wait(DEFAULT_IMPLICIT_WAIT)
             
         except Exception as e:

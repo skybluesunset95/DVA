@@ -18,6 +18,7 @@ from modules.base_module import (
     STATUS_KEY_ATTENDANCE, 
     STATUS_KEY_QUIZ
 )
+from modules.notification_manager import NotificationManager
 
 class TaskManagerState:
     """TaskManager 상태를 체계적으로 관리하는 클래스"""
@@ -203,6 +204,7 @@ class TaskManager:
         self.logger = logging.getLogger(__name__)
         self._module_cache = {}  # 모듈 클래스 캐시
         self.browser_lock = threading.RLock()  # 브라우저 전역 잠금 (재진입 가능)
+        self.notifier = NotificationManager() # 카카오 알림 매니저 초기화
     
     def initialize_web_automation(self, gui_callbacks=None):
         """웹드라이버가 없으면 초기화"""
@@ -301,7 +303,8 @@ class TaskManager:
             'attendance': '출석체크', 
             'quiz': '퀴즈풀기',
             'survey': '설문참여',
-            'seminar': '라이브세미나'
+            'seminar': '라이브세미나',
+            'points': '포인트'
         }
         
         # 모듈 실행 (모든 모듈에 동일한 설정 적용)
@@ -327,6 +330,11 @@ class TaskManager:
 
                 gui_logger = self.create_gui_logger(gui_callbacks)
                 
+                # 모듈에서 직접 개별 결과를 알림으로 보낼 수 있도록 콜백 추가
+                mod_callbacks = gui_callbacks.copy()
+                mod_callbacks['notify_kakao'] = lambda msg, cat="notify_survey": self.notifier.send_kakao_message(msg, category=cat)
+                mod_callbacks['notify_success'] = lambda msg: self.notifier.send_kakao_message(msg, category="notify_survey")
+                
                 # 현재 모듈 상태 업데이트
                 self.state.current_module = module_name
                 
@@ -335,9 +343,9 @@ class TaskManager:
                 
                 # BaseModule을 상속받은 모듈은 자동으로 set_callbacks 사용 가능
                 if isinstance(module, BaseModule):
-                    module.set_callbacks(gui_callbacks)
+                    module.set_callbacks(mod_callbacks)
                     # 새로운 콜백 방식을 위한 속성 설정
-                    module.gui_callbacks = gui_callbacks
+                    module.gui_callbacks = mod_callbacks
                     
                     # gui_instance가 있으면 모듈에 설정 (로그인과 대시보드 모듈)
                     if module_name in ["로그인", "대시보드"] and 'gui_instance' in gui_callbacks and gui_callbacks['gui_instance']:
@@ -366,11 +374,25 @@ class TaskManager:
                     is_success = bool(result)
                 
                 if is_success:
-                    self.log_success(module_name, gui_callbacks, message)
+                    # '설문참여'는 개별 항목별로 이미 알림을 보냈으므로 최종 요약 알림은 건너뜀
+                    skip = (module_name == "설문참여")
+                    self.log_success(module_name, gui_callbacks, message, skip_notify=skip)
                     self.handle_special_actions(module_name, 'success')
                 else:
                     self.log_failure(module_name, gui_callbacks, message)
                     self.handle_special_actions(module_name, 'failure')
+
+                # [중요] 특정 모듈(로그인, 출석체크, 퀴즈풀기) 완료 후에는 자동으로 포인트 체크 수행
+                # 각 모듈 내부에서 수행하던 것을 TaskManager가 통합 관리하도록 변경 (순서 보장)
+                if module_name in ["로그인", "출석체크", "퀴즈풀기"]:
+                    try:
+                        self.logger.info(f"{module_name} 완료 후 포인트 상태 확인 시작...")
+                        points_class = self.get_module_class('points')
+                        points_mod = points_class(web_auto, gui_logger)
+                        points_mod.gui_callbacks = mod_callbacks
+                        points_mod.execute()
+                    except Exception as pe:
+                        self.logger.error(f"후속 포인트 체크 중 오류: {str(pe)}")
                 
         except Exception as e:
             self.log_error(module_name, str(e), gui_callbacks)
@@ -512,7 +534,7 @@ class TaskManager:
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def _handle_seminar_single_action(self, link, status, gui_callbacks):
+    def _handle_seminar_single_action(self, link, status, gui_callbacks, title=None):
         """개별 세미나 액션 처리 (더블클릭)"""
         def _run():
             try:
@@ -527,11 +549,18 @@ class TaskManager:
 
                     result = seminar.handle_seminar_action(link, status)
                 success = result.get('success', False) if isinstance(result, dict) else bool(result)
+                message = result.get('message', '') if isinstance(result, dict) else ''
+                
                 if success:
-                    gui_callbacks['log_message']("✅ 작업 완료")
+                    # '입장하기' 상태인 경우 세미나 입장 알림 전송
+                    if status == '입장하기':
+                        display_title = title if title else "세미나"
+                        self.log_success("세미나 입장", gui_callbacks, f"세미나 입장 완료: {display_title}")
+                    else:
+                        gui_callbacks['log_message']("✅ 작업 완료")
                     self._handle_seminar_refresh(gui_callbacks)
                 else:
-                    msg = result.get('message', '작업 실패') if isinstance(result, dict) else '작업 실패'
+                    msg = message if message else '작업 실패'
                     gui_callbacks['log_message'](f"❌ {msg}")
             except Exception as e:
                 gui_callbacks['log_error'](f"세미나 작업 중 오류: {str(e)}")
@@ -803,9 +832,15 @@ class TaskManager:
                 seminar.set_callbacks(gui_callbacks)
                 
                 result = seminar.enter_seminar()
-                if isinstance(result, dict):
-                    return result.get('success', False)
-                return bool(result)
+                success = result.get('success', False) if isinstance(result, dict) else bool(result)
+                message = result.get('message', '') if isinstance(result, dict) else ''
+                
+                if success:
+                    self.log_success("세미나 입장", gui_callbacks, f"자동 세미나 입장 성공: {title}")
+                    return True
+                else:
+                    self.log_failure("세미나 입장", gui_callbacks, f"자동 세미나 입장 실패: {title} ({message})")
+                    return False
         except Exception as e:
             self.logger.error(f"세미나 자동 입장 오류: {str(e)}")
             return False
@@ -896,23 +931,51 @@ class TaskManager:
         
         return self._module_cache[module_type]
     
-    def log_success(self, module_name, gui_callbacks, custom_message=""):
+    def _get_kakao_category(self, module_name):
+        """모듈 이름을 카톡 알림 카테고리 키로 변환"""
+        mapping = {
+            "출석체크": "notify_attendance",
+            "퀴즈풀기": "notify_quiz",
+            "설문참여": "notify_survey",
+            "세미나 자동신청": "notify_seminar_join",
+            "세미나 입장": "notify_seminar_enter",
+            "배민 쿠폰 구매": "notify_baemin",
+            "포인트": "notify_startup_summary",
+            "로그인": "notify_startup_summary"
+        }
+        return mapping.get(module_name)
+
+    def log_success(self, module_name, gui_callbacks, custom_message="", skip_notify=False):
         """성공 로깅 - 일관된 방식"""
         message = custom_message if custom_message else f"{module_name} 완료"
         gui_callbacks['log_and_update_status'](message, message)
         self.logger.info(message)
+        
+        # 특정 성공 로그 시 카카오톡 전송
+        if not skip_notify:
+            category = self._get_kakao_category(module_name)
+            if category:
+                self.notifier.send_kakao_message(message, category=category)
     
     def log_failure(self, module_name, gui_callbacks, custom_message=""):
         """실패 로깅 - 일관된 방식"""
         message = custom_message if custom_message else f"{module_name} 실패"
         gui_callbacks['log_and_update_status'](message, message)
         self.logger.warning(message)
+        
+        # 특정 실패 로그 시 카카오톡 전송
+        category = self._get_kakao_category(module_name)
+        if category:
+            self.notifier.send_kakao_message(message, category=category)
     
     def log_error(self, module_name, error_msg, gui_callbacks):
         """오류 로깅 - 일관된 방식"""
         message = f"{module_name} 오류: {error_msg}"
         gui_callbacks['log_and_update_status'](message, message)
         self.logger.error(f"모듈 실행 오류: {module_name} - {error_msg}")
+        
+        # 모든 오류는 중요하므로 알림 전송 (오류 알림 설정에 따름)
+        self.notifier.send_kakao_message(message, category="notify_error")
     
     def handle_special_actions(self, module_name, action_type):
         """모듈별 특별 액션 처리 - 한 곳에서 관리"""

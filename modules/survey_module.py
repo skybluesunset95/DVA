@@ -122,7 +122,13 @@ class SurveyModule(BaseModule):
 
                     # 재입장하기 버튼 확인 및 처리
                     if self.auto_click_reenter_button():
-                        self.log_success(f"✅ 설문 참여 성공: {target['title']}")
+                        success_msg = f"설문 참여 성공: {target['title']}"
+                        self.log_success(f"✅ {success_msg}")
+                        
+                        # 개별 항목별 카톡 알림 전송
+                        if hasattr(self, 'gui_callbacks') and 'notify_success' in self.gui_callbacks:
+                            self.gui_callbacks['notify_success'](success_msg)
+                        
                         success_count += 1
                         # 설문 페이지가 열렸을 수 있으므로 목록 페이지로 리셋
                         self.web_automation.driver.get(VOD_LIST_PAGE_URL)

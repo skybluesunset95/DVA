@@ -120,12 +120,27 @@ class PointsCheckModule(BaseModule):
                 'quiz_status': points_data[STATUS_KEY_QUIZ]
             }
             
+            # 4단계: 상세 메시지 생성 (알림용)
+            summary_msg = (
+                f"[{user_name}님 초기 상태]\n"
+                f"💰 포인트: {points_data['points']}P\n"
+                f"📅 출석체크: {'완료' if points_data[STATUS_KEY_ATTENDANCE] == STATUS_ATTENDANCE_COMPLETE else '미완료'}\n"
+                f"🧠 퀴즈참여: {'완료' if points_data[STATUS_KEY_QUIZ] == STATUS_QUIZ_COMPLETE else '미완료'}"
+            )
+            
             self.log_success(f"활동 정보 수집 완료: {data['attendance_status']}, {data['quiz_status']}")
             
-            # 4단계: GUI 업데이트
+            # 5단계: GUI 업데이트
             self._update_gui_directly(data)
             
-            return self.create_result(True, "사용자 정보 및 포인트 수집 완료", data)
+            # 6단계: 카톡 알림 전송 (별도로 알림 전송)
+            if hasattr(self, 'gui_callbacks') and 'notify_kakao' in self.gui_callbacks:
+                self.gui_callbacks['notify_kakao'](summary_msg, cat="notify_startup_summary")
+            
+            # 7단계: 로그 기록
+            self.log_success(summary_msg)
+            
+            return self.create_result(True, summary_msg, data)
             
         except Exception as e:
             error_msg = f"{ERROR_USER_INFO_FAILED}: {str(e)}"

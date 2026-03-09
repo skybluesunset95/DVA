@@ -80,6 +80,7 @@ $batFileName = "$accountName`_닥터빌.bat"
 $batContent = "@echo off`r`nchcp 65001 >nul 2>&1`r`nset ACCOUNT_NAME=$accountName`r`nset ACCOUNT_USERNAME=$accountUsername`r`nset ACCOUNT_PASSWORD=$plainPassword`r`nstart /min `"`" pythonw main.py"
 
 try {
+    # 한글 호환성을 위해 BOM이 포함된 UTF8로 저장 (Windows CMD 필수)
     $batContent | Out-File -FilePath $batFileName -Encoding UTF8 -Force
     Write-Host "Account file '$batFileName' created successfully!" -ForegroundColor Green
 }

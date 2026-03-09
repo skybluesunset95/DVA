@@ -109,13 +109,17 @@ class BaseModule:
                 last_exception = e
                 time.sleep(0.5)
             except TimeoutException as e:
+                # 타임아웃 발생 시 last_exception을 설정하지만 재시도하지 않음
                 last_exception = e
-                break # 타임아웃은 재시도 의미가 적음
+                break 
             except Exception as e:
                 last_exception = e
                 time.sleep(0.5)
         
-        raise last_exception or Exception(f"요소를 찾을 수 없음: {value}")
+        # 호출한 곳에서 처리할 수 있도록 원래의 예외를 발생시킴
+        if last_exception:
+            raise last_exception
+        raise Exception(f"요소를 찾을 수 없음: {value}")
 
     def find_elements_safe(self, by, value, timeout=10, retries=3):
         """여러 요소를 안전하게 찾습니다."""
@@ -130,8 +134,9 @@ class BaseModule:
                     EC.presence_of_all_elements_located((by, value))
                 )
                 return elements
-            except StaleElementReferenceException:
-                self.log_warning(f"요소 리스트 만료 감지, 재시도 중... ({i+1}/{retries})")
+            except (StaleElementReferenceException, TimeoutException) as e:
+                if isinstance(e, StaleElementReferenceException):
+                    self.log_warning(f"요소 리스트 만료 감지, 재시도 중... ({i+1}/{retries})")
                 time.sleep(0.5)
         return []
 
@@ -248,5 +253,8 @@ class BaseModule:
             else:
                 self.log_info("포인트 상태 확인 실패")
                 
+            return result
+                
         except Exception as e:
             self.log_info(f"포인트 상태 확인 중 오류: {str(e)}")
+            return None

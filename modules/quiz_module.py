@@ -90,6 +90,11 @@ class QuizModule(BaseModule):
     
     def execute(self):
         """퀴즈풀기 실행 - 로컬 DB 연동 및 블로그 검색 하이브리드 방식"""
+        is_success = False
+        result_msg = ""
+        quiz_data = None
+        blog_answers_str = None
+        
         try:
             self.log_info("퀴즈풀기 시작...")
             
@@ -99,50 +104,49 @@ class QuizModule(BaseModule):
             # 1단계: 퀴즈가 있는 페이지 찾기
             quiz_page = self.find_quiz_page()
             if not quiz_page:
-                self.log_warning("오늘은 퀴즈가 제공되지 않습니다.")
-                self.check_points_after_activity()
-                return self.create_result(False, "오늘은 퀴즈가 제공되지 않습니다.")
+                is_success = False
+                result_msg = "오늘은 퀴즈가 제공되지 않습니다."
+                return self.create_result(is_success, result_msg)
             
             # 2단계: 퀴즈 팝업 열기
             if not self.open_quiz_popup():
-                return self.create_result(False, "퀴즈 팝업 열기 실패")
+                result_msg = "퀴즈 팝업 열기 실패"
+                return self.create_result(False, result_msg)
             
-            # 3단계: 문제 정보 수집 (팝업 열린 직후 수집)
+            # 3단계: 문제 정보 수집
             quiz_data = self.collect_quiz_info()
             if not quiz_data:
-                return self.create_result(False, "퀴즈 정보 수집 실패")
+                result_msg = "퀴즈 정보 수집 실패"
+                return self.create_result(False, result_msg)
             
-            # 4단계: 각 문제별 정답 확보 및 즉시 선택 (survey_module 방식)
-            blog_answers_str = None
+            # 4단계: 각 문제별 정답 확보 및 즉시 선택
             blog_searched = False
-            
             for i, q_info in enumerate(quiz_data['questions']):
                 self.log_info(f"--- [문제 {i+1}] 분석 및 답변 시작 ---")
-                
                 success, blog_answers_str, blog_searched = self._process_single_question(
                     q_info, i, quiz_data, blog_answers_str, blog_searched
                 )
-                
                 if not success:
-                    return self.create_result(False, f"문제 {i+1} 정답 부재 또는 선택 실패로 인해 진행 불가")
+                    result_msg = f"문제 {i+1} 정답 부재 또는 선택 실패로 인해 진행 불가"
+                    return self.create_result(False, result_msg)
             
             # 5단계: 모든 정답 선택 후 제출
             self.log_info("✨ 모든 문제 답변 완료. '정답 도전' 버튼을 클릭합니다.")
             if self.click_submit_button():
-                # 블로그에서 새로 찾은 정답이 있다면 DB에 학습 (나중에 또 안물어보게)
+                # 블로그에서 새로 찾은 정답이 있다면 DB에 학습
                 if blog_answers_str:
                     self.save_to_local_db(quiz_data, blog_answers_str)
                 
-                self.check_points_after_activity()
+                is_success = True
+                result_msg = "일일 퀴즈 풀기 성공 및 데이터 학습 완료"
                 self.log_success("🎉 일일 퀴즈 풀기 대성공!")
-                return self.create_result(True, "일일 퀴즈 풀기 성공 및 데이터 학습 완료")
             else:
-                return self.create_result(False, "답안 제출 버튼 클릭 실패")
+                result_msg = "답안 제출 버튼 클릭 실패"
             
         except Exception as e:
-            error_msg = f"퀴즈풀기 실행 실패: {str(e)}"
-            self.log_error(error_msg)
-            return self.create_result(False, error_msg)
+            result_msg = f"퀴즈풀기 실행 실패: {str(e)}"
+            self.log_error(result_msg)
+            
         finally:
             # 🗑️ 블로그 탭 정리 (남아있다면)
             try:
@@ -153,6 +157,8 @@ class QuizModule(BaseModule):
                     self.web_automation.driver.switch_to.window(self.original_window)
             except:
                 pass
+                
+            return self.create_result(is_success, result_msg)
 
     def _process_single_question(self, q_info, index, quiz_data, blog_answers_str, blog_searched):
         """단일 문제에 대해 정답을 찾고 선택하는 로직 처리"""

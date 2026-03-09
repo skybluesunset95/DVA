@@ -61,10 +61,7 @@ class LoginModule(BaseModule):
             if not self._execute_login_steps():
                 return self.create_result(False, "로그인 단계 실행 실패")
             
-            # 로그인 후 자동 작업 실행
-            self._execute_post_login_tasks()
-            
-            self.log_success("🎉 자동 로그인이 성공적으로 완료되었습니다!")
+            # 로그인 완료 후 성공 반환 (포인트 확인은 이제 TaskManager에서 수행)
             return self.create_result(True, "자동 로그인 성공")
             
         except Exception as e:
@@ -106,13 +103,11 @@ class LoginModule(BaseModule):
             self.log_success("자동 로그인이 성공적으로 완료되었습니다!")
             
             # 로그인 후 자동으로 포인트 상태 확인 (출석체크와 동일한 방식)
-            self._check_points_after_login()
-            
-            return True
+            return self._check_points_after_login()
             
         except Exception as e:
             self.log_error(f"로그인 후 작업 실행 중 오류: {str(e)}")
-            return False
+            return None
     
     def _cleanup_on_error(self):
         """오류 발생 시 정리 작업을 수행합니다."""
@@ -281,4 +276,4 @@ class LoginModule(BaseModule):
     
     def _check_points_after_login(self):
         """로그인 후 포인트 상태 확인 - BaseModule의 공통 메서드 사용"""
-        self.check_points_after_activity()
+        return self.check_points_after_activity()

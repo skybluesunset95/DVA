@@ -222,10 +222,9 @@ config.ini
 
 # 데이터 및 설정 (공통 설정 및 DB 데이터 제외)
 data/*.json
-!data/settings.json
-!data/survey_quizzes.json
 !data/quiz_problem.json
 !data/survey_problem.json
+data/settings.json
 
 # 백업 파일들
 backup/
@@ -241,9 +240,8 @@ tmp/
 .agent/
 .gemini/
 
-# 문서 및 가이드 파일들 (변경 이력 포함)
+# 문서 및 가이드 파일들 (폴더째 제외)
 docs/
-!docs/CHANGELOG.md
 
 # 마크다운 파일(README.md 제외)
 *.md

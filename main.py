@@ -228,12 +228,16 @@ class DoctorBillApp:
         
         status_tag = tags[1] if len(tags) > 1 else None
         
-        self.log_message("세미나 상세 요청을 처리중입니다...")
+        # 제목 추출 (4번째 컬럼)
+        values = self.ui.seminar_panel.seminar_tree.item(item, "values")
+        title = values[3] if len(values) > 3 else "알 수 없는 세미나"
+        
+        self.log_message(f"세미나 상세 요청을 처리중입니다: {title}")
         if detail_link.startswith('/'):
             detail_link = "https://www.doctorville.co.kr" + detail_link
         
         # TaskManager로 전달하여 처리
-        self.task_manager._handle_seminar_single_action(detail_link, status_tag, self.get_callbacks())
+        self.task_manager._handle_seminar_single_action(detail_link, status_tag, self.get_callbacks(), title=title)
         self.ui.seminar_panel.seminar_tree.selection_remove(item)
 
     def open_settings(self):
