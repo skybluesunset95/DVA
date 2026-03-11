@@ -248,6 +248,12 @@ class DoctorBillUpdater:
         """파일을 보존해야 하는지 확인"""
         if not file_path.exists():
             return False
+            
+        file_name = file_path.name.lower()
+        
+        # 💡 사용자의 요청: 퀴즈 및 설문 정답 데이터는 최신본으로 덮어쓰기
+        if file_name in ['quiz_problem.json', 'survey_problem.json']:
+            return False
         
         # 확장자로 판단
         if file_path.suffix.lower() in self.preserve_extensions:
@@ -255,7 +261,7 @@ class DoctorBillUpdater:
         
         # 특정 파일명으로 판단
         preserve_names = ['chromedriver', 'config', 'settings']
-        if any(name in file_path.name.lower() for name in preserve_names):
+        if any(name in file_name for name in preserve_names):
             return True
         
         return False

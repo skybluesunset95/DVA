@@ -20,12 +20,16 @@ def setup():
     password = getpass.getpass("▶ 닥터빌 로그인 비밀번호를 입력하세요 (입력 시 화면에 표시되지 않습니다): ").strip()
 
     # 4. 배치 파일 내용 생성 (UTF-8)
+    # 현재 실행 중인 파이썬 경로를 기반으로 pythonw.exe 경로 추출
+    python_exe = sys.executable
+    pythonw_exe = python_exe.lower().replace("python.exe", "pythonw.exe")
+    
     bat_content = f"""@echo off
 chcp 65001 >nul 2>&1
 set ACCOUNT_NAME={account_name}
 set ACCOUNT_USERNAME={username}
 set ACCOUNT_PASSWORD={password}
-start /min "" pythonw main.py
+start /min "" "{pythonw_exe}" main.py
 """
 
     bat_file_name = f"{account_name}_닥터빌.bat"
