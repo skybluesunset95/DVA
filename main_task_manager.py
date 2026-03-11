@@ -790,6 +790,18 @@ class TaskManager:
                         self.log_success("배민 쿠폰 구매", gui_callbacks, message)
                     else:
                         self.log_failure("배민 쿠폰 구매", gui_callbacks, message)
+                        
+                    # 💡 배민 구매 시도 후 포인트 상태 자동 갱신
+                    try:
+                        self.logger.info("배민 구매 시도 후 포인트 상태 확인 시작...")
+                        points_class = self.get_module_class('points')
+                        points_mod = points_class(web_auto, gui_logger)
+                        # gui_callbacks 대신 mod_callbacks 역할을 하는 사전 정의된 콜백 사용 필요
+                        # execute_baemin_purchase 내에서는 gui_callbacks를 그대로 사용
+                        points_mod.gui_callbacks = gui_callbacks
+                        points_mod.execute()
+                    except Exception as pe:
+                        self.logger.error(f"배민 후속 포인트 체크 중 오류: {str(pe)}")
             except Exception as e:
                 self.log_error("배민 쿠폰 구매", str(e), gui_callbacks)
             finally:

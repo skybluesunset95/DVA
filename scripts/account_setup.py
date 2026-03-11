@@ -25,7 +25,6 @@ def setup():
     pythonw_exe = python_exe.lower().replace("python.exe", "pythonw.exe")
     
     bat_content = f"""@echo off
-chcp 65001 >nul 2>&1
 set ACCOUNT_NAME={account_name}
 set ACCOUNT_USERNAME={username}
 set ACCOUNT_PASSWORD={password}
@@ -35,8 +34,8 @@ start /min "" "{pythonw_exe}" main.py
     bat_file_name = f"{account_name}_닥터빌.bat"
     
     try:
-        # 윈도우 CMD 호환을 위해 UTF-8 (BOM 없음)으로 저장
-        with open(bat_file_name, "w", encoding="utf-8") as f:
+        # 윈도우 CMD(한국어) 환경의 정상적인 이름 표시를 위해 CP949로 저장 (BOM 없음)
+        with open(bat_file_name, "w", encoding="cp949", errors="ignore") as f:
             f.write(bat_content)
         
         print(f"\n✅ '{bat_file_name}' 파일이 성공적으로 생성되었습니다!")

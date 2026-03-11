@@ -81,26 +81,26 @@ def show_baemin_purchase_dialog(parent, current_points, max_coupons, phone_numbe
         font=("맑은 고딕", 12), bg='#f8f9fa', fg='#2c3e50'
     ).pack(side='left', padx=(0, 10))
     
-    qty_var = tk.IntVar(value=min(1, max_coupons))
+    qty_var = tk.IntVar(value=1)
+    
+    qty_spinbox = tk.Spinbox(
+        qty_frame, from_=1, to=max(99, max_coupons),
+        textvariable=qty_var, width=5,
+        font=("맑은 고딕", 14, "bold"),
+        justify='center'
+    )
+    qty_spinbox.pack(side='left')
     
     if max_coupons > 0:
-        qty_spinbox = tk.Spinbox(
-            qty_frame, from_=1, to=max_coupons,
-            textvariable=qty_var, width=5,
-            font=("맑은 고딕", 14, "bold"),
-            justify='center'
-        )
-        qty_spinbox.pack(side='left')
-        
         tk.Label(
             qty_frame, text=f"개  (1~{max_coupons})",
             font=("맑은 고딕", 11), bg='#f8f9fa', fg='#7f8c8d'
         ).pack(side='left', padx=(5, 0))
     else:
         tk.Label(
-            qty_frame, text="구매할 수 없습니다 (포인트 부족)",
+            qty_frame, text="개 (포인트 부족하지만 진행 가능)",
             font=("맑은 고딕", 11), bg='#f8f9fa', fg='#e74c3c'
-        ).pack(side='left')
+        ).pack(side='left', padx=(5, 0))
     
     # 버튼 내부 로직
     def on_confirm():
@@ -111,9 +111,13 @@ def show_baemin_purchase_dialog(parent, current_points, max_coupons, phone_numbe
             messagebox.showerror("오류", "받는 사람 번호를 입력해주세요.")
             return
             
-        if quantity < 1 or quantity > max_coupons:
-            messagebox.showerror("오류", f"잘못된 수량입니다: {quantity}")
+        if quantity < 1:
+            messagebox.showerror("오류", "수량은 1개 이상이어야 합니다.")
             return
+            
+        if max_coupons > 0 and quantity > max_coupons:
+            if not messagebox.askyesno("확인", f"보유 포인트로 구매 가능한 수량({max_coupons}개)보다 많습니다.\n계속 진행하시겠습니까?"):
+                return
             
         total_cost = quantity * COUPON_PRICE
         dialog.destroy()
@@ -127,14 +131,13 @@ def show_baemin_purchase_dialog(parent, current_points, max_coupons, phone_numbe
     btn_frame = tk.Frame(dialog, bg='#f8f9fa')
     btn_frame.pack(pady=(0, 20))
     
-    if max_coupons > 0:
-        confirm_btn = tk.Button(
-            btn_frame, text="✅ 구매하기", font=("맑은 고딕", 12, "bold"),
-            bg='#27ae60', fg='white', activebackground='#1e8449',
-            width=12, relief='flat', cursor='hand2',
-            command=on_confirm
-        )
-        confirm_btn.pack(side='left', padx=10)
+    confirm_btn = tk.Button(
+        btn_frame, text="✅ 구매하기", font=("맑은 고딕", 12, "bold"),
+        bg='#27ae60', fg='white', activebackground='#1e8449',
+        width=12, relief='flat', cursor='hand2',
+        command=on_confirm
+    )
+    confirm_btn.pack(side='left', padx=10)
     
     cancel_btn = tk.Button(
         btn_frame, text="❌ 취소", font=("맑은 고딕", 12),
