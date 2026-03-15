@@ -751,70 +751,22 @@ class QuizModule(BaseModule):
             return False
 
     def prompt_single_question_intervention(self, quiz_data, question_index):
-        """특정 문제 하나에 대해 수동 개입 유도 (설문 방식 + 블로그 힌트 지원)"""
+        """특정 문제 하나에 대해 수동 개입 유도 (단순 대기 방식)"""
         try:
             q_info = quiz_data['questions'][question_index]
             q_text = q_info['question']
             prod_title = quiz_data['product_info']['title']
             
-            screenshot_paths = []
-            
-            # 🔥 1. 블로그 힌트 캡처 (있는 경우)
-            if self.blog_window:
-                try:
-                    self.log_info(f"🔎 블로그 탭에서 문제 {question_index+1} 힌트 캡처 중...")
-                    self.web_automation.driver.switch_to.window(self.blog_window)
-                    
-                    # 네이버 블로그 전용: 본문 iframe으로 전환 시도 및 스크롤
-                    try:
-                        # 1단계: mainFrame 찾기
-                        main_frame = self.find_element_safe(By.ID, "mainFrame")
-                        self.web_automation.driver.switch_to.frame(main_frame)
-                        
-                        # 2단계: 정답이 몰려있는 영역으로 스크롤
-                        se_images = self.find_elements_safe(By.CLASS_NAME, "se-image-resource")
-                        if len(se_images) >= 3:
-                            target_hint = se_images[2]
-                            self.web_automation.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_hint)
-                        else:
-                            self.web_automation.driver.execute_script("window.scrollTo(0, 1000);")
-                        
-                        time.sleep(1.0)
-                    except:
-                        # iframe을 못 찾거나 스크롤 실패 시 그냥 진행
-                        pass
-
-                    # 현재 뷰포트 캡처
-                    hint_path = os.path.join(os.getcwd(), f"quiz_hint_q{question_index+1}.png")
-                    self.web_automation.driver.save_screenshot(hint_path)
-                    screenshot_paths.append(hint_path)
-                    
-                    # 마무리: 반드시 메인 컨텐츠로 복귀 후 닥터빌 탭으로 전환
-                    self.web_automation.driver.switch_to.default_content()
-                    self.web_automation.driver.switch_to.window(self.original_window)
-                except Exception as b_err:
-                    self.log_warning(f"블로그 힌트 캡처 중 경미한 오류: {b_err}")
-                    # 실패 시에도 원래 창으로는 돌아와야 함
-                    try: self.web_automation.driver.switch_to.window(self.original_window)
-                    except: pass
-
-            # 2. 닥터빌 문제는 캡처하지 않음 (사용자 요청: 블로그 힌트만 필요)
-            if not screenshot_paths:
-                # 블로그 힌트가 없는 경우에만 현재 화면(닥터빌)을 폴백으로 캡처
-                f_path = os.path.join(os.getcwd(), f"quiz_full_fallback.png")
-                self.web_automation.driver.save_screenshot(f_path)
-                screenshot_paths.append(f_path)
-
-            # 3. GUI 호출 (모든 스크린샷 전달)
+            # 1. GUI 호출 (이미지 없이 정보만 전달)
             if 'on_quiz_problem' in self.gui_callbacks:
                 self.gui_callbacks['on_quiz_problem'](
                     initial_question=q_text,
                     initial_category=prod_title,
-                    image_path=screenshot_paths
+                    image_path=None  # 이미지 경로 제거
                 )
-                self.log_info(f"❓ 사진들을 보고 문제 {question_index+1} 정답을 입력해 주세요.")
+                self.log_info(f"❓ 문제 {question_index+1} 정답을 입력창에 입력해 주세요.")
                 
-                # 4. 동기식 실시간 루프 대기
+                # 2. 동기식 실시간 루프 대기
                 self.log_info(f"⌛ 정답 등록 대기 중... (최대 10분)")
                 waiting_seconds = 0
                 max_wait = 600
@@ -842,20 +794,8 @@ class QuizModule(BaseModule):
                 
         except Exception as e:
             self.log_error(f"수동 개입 유도 오류: {str(e)}")
-        finally:
-            # 🔥 사용이 끝난 임시 스크린샷 파일들 정리
-            if 'screenshot_paths' in locals() and screenshot_paths:
-                for path in screenshot_paths:
-                    if os.path.exists(path):
-                        try:
-                            # 약간의 지연 후 삭제 (이미지 뷰어가 파일을 놓아줄 시간)
-                            time.sleep(0.5) 
-                            os.remove(path)
-                            self.log_info(f"🗑️ 임시 파일 삭제 완료: {os.path.basename(path)}")
-                        except:
-                            # 파일이 열려있어 삭제 실패해도 무시
-                            pass
         return False
+
 
     def open_quiz_popup(self):
         """2단계: 퀴즈 팝업 열기"""

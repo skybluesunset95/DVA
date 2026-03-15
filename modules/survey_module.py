@@ -169,19 +169,9 @@ class SurveyModule(BaseModule):
                     self.log_info("모든 창 정리 완료, 포인트 확인을 진행합니다...")
                     self._run_points_check_module()
                     
-                    # 🔥 임시 스크린샷 파일 삭제
-                    try:
-                        temp_img = os.path.join(os.getcwd(), "survey_quiz_temp.png")
-                        if os.path.exists(temp_img):
-                            # 약간 대기 후 삭제 (이미지 뷰어가 파일을 물고 있을 수 있음)
-                            time.sleep(2)
-                            os.remove(temp_img)
-                            self.log_info("🧹 임시 스크린샷 파일을 삭제했습니다.")
-                    except:
-                        pass
-                    finally:
-                        # 실행 종료 표시
-                        SurveyModule._is_running = False
+                    # 실행 종료 표시
+                    SurveyModule._is_running = False
+
     
     def auto_click_reenter_button(self):
         """재입장하기 버튼을 자동으로 클릭합니다."""
@@ -860,19 +850,6 @@ class SurveyModule(BaseModule):
                                     if hasattr(gui, 'root') and hasattr(gui, 'open_survey_problem'):
                                         self.log_warning(f"문제 {question_number}번: 정답 미등록. 설문 문제 자동 관리 창을 엽니다.")
 
-                                        # 스크린샷 캡처 (특히 헤드리스 모드에서 유용)
-                                        screenshot_path = os.path.join(os.getcwd(), "survey_quiz_temp.png")
-                                        try:
-                                            # 🔥 해당 문제를 화면 중앙으로 스크롤하여 캡처
-                                            self.web_automation.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", question)
-                                            time.sleep(0.5)  # 스크롤 후 안정화 대기
-                                            
-                                            self.web_automation.driver.save_screenshot(screenshot_path)
-                                            self.log_info(f"📸 {question_number}번 문제 위치로 스크롤하여 캡처했습니다.")
-                                        except Exception as e:
-                                            self.log_warning(f"스크린샷 캡처 실패: {str(e)}")
-                                            screenshot_path = None
-                                        
                                         # 카테고리 추출 (페이지 타이틀에서)
                                         category = ""
                                         try:
@@ -897,8 +874,8 @@ class SurveyModule(BaseModule):
                                         # [퀴즈] 태그 및 불필요한 별표(*) 제거
                                         display_question = display_question.replace('[퀴즈]', '').replace('*', '').strip()
                                             
-                                        # 람다 함수로 인수 전달 (이미지 경로 포함)
-                                        gui.root.after(0, lambda q=display_question, c=category, img=screenshot_path: gui.open_survey_problem(initial_question=q, initial_category=c, image_path=img))
+                                        # 람다 함수로 인수 전달 (이미지 없이 정보만 전달)
+                                        gui.root.after(0, lambda q=display_question, c=category: gui.open_survey_problem(initial_question=q, initial_category=c, image_path=None))
                                         
                                         # 정답이 새로 등록될 때까지 대기
                                         self.log_info(f"⌛ 문제 {question_number}번 정답이 등록될 때까지 대기합니다...")
